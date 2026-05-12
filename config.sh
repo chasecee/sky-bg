@@ -23,7 +23,7 @@ RAW_CROP_TOP="${RAW_CROP_TOP:-22}"
 CANVAS_FIT="${CANVAS_FIT:-cover}"
 
 # Where to pin the source within the canvas: center | top | bottom | left | right.
-CANVAS_ANCHOR="${CANVAS_ANCHOR:-center}"
+CANVAS_ANCHOR="${CANVAS_ANCHOR:-bottom}"
 
 # Blur radius applied before slicing. Single value = uniform.
 # Comma list = progressive top->bottom, evenly distributed (e.g. "10,50" or "10,30,50"). 0 = sharp.

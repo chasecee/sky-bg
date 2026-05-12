@@ -2,6 +2,8 @@
 
 Pulls a webcam frame on an interval (JPEG endpoint or the last frame of an MP4/MOV), fits it onto the virtual desktop arrangement, slices out each monitor's region, and sets it as the macOS wallpaper across a multi-monitor setup. Runs as a `launchd` user agent.
 
+Imagery courtesy of the [Horel Research Group](https://horel.chpc.utah.edu/) (MesoWest / University of Utah Department of Atmospheric Sciences, CHPC) — the WBB rooftop camera atop the William Browning Building, looking south over the Salt Lake Valley toward the Wasatch and Oquirrh ranges. Current frame: <https://horel.chpc.utah.edu/data/station_cameras/wbbs_cam/wbbs_cam_current.jpg>.
+
 ## Stack
 
 A single compiled Swift binary (`bin/skybg`) does everything image-and-display:
