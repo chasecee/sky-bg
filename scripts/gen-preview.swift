@@ -6,10 +6,12 @@
 // Reads the same canvas/blur/color env vars as skybg.swift so the preview
 // matches the live config when invoked via gen-preview.sh. Extra knobs:
 //
-//   GIF_FRAMES        24
-//   GIF_DELAY_MS      100
+//   GIF_FRAMES        36
+//   GIF_DELAY_MS      120
 //   GIF_TARGET_WIDTH  1100
 //   GIF_BEZEL_PX      6
+//   GIF_SPAN_FRAC     0.5    — fraction of source video timeline to sample
+//   GIF_SPAN_CENTER   0.5    — where that window sits (0=start, 1=end)
 //   GIF_OUT           docs/preview.gif
 
 import Foundation
@@ -39,10 +41,12 @@ guard ["mp4", "mov", "m4v"].contains(ext) else {
     die("WEBCAM_URL must be an MP4/MOV (got .\(ext)) — only video sources have multiple frames to animate")
 }
 
-let frameCount = max(2, envInt("GIF_FRAMES", 24))
-let delayMs    = max(20, envInt("GIF_DELAY_MS", 100))
+let frameCount = max(2, envInt("GIF_FRAMES", 36))
+let delayMs    = max(20, envInt("GIF_DELAY_MS", 120))
 let targetW    = max(200, envInt("GIF_TARGET_WIDTH", 1100))
 let bezelPx    = max(0, envInt("GIF_BEZEL_PX", 6))
+let spanFrac   = min(1.0, max(0.05, envDouble("GIF_SPAN_FRAC", 0.5)))
+let spanCenter = min(1.0, max(0.0, envDouble("GIF_SPAN_CENTER", 0.5)))
 let outPath    = env("GIF_OUT") ?? "docs/preview.gif"
 
 let cropTop    = CGFloat(envInt("RAW_CROP_TOP", 22))
@@ -110,10 +114,18 @@ durSem.wait()
 if let e = loadErr { die("load duration failed: \(e)") }
 let durSec = CMTimeGetSeconds(dur)
 guard durSec.isFinite, durSec > 0 else { die("video duration invalid: \(durSec)") }
-note("duration \(String(format: "%.2f", durSec))s, extracting \(frameCount) frames")
+
+// Sub-window of the source timeline to sample. Defaults cover the middle 50%
+// of the video, which trims the dawn/dusk extremes and reduces frame-to-frame
+// variance vs sampling the full 24h cycle.
+let halfSpan = durSec * spanFrac / 2
+let rawCenter = durSec * spanCenter
+let startSec = max(0, rawCenter - halfSpan)
+let endSec   = min(durSec, rawCenter + halfSpan)
+note("duration \(String(format: "%.2f", durSec))s, sampling [\(String(format: "%.2f", startSec))s, \(String(format: "%.2f", endSec))s] (frac=\(spanFrac), center=\(spanCenter)), extracting \(frameCount) frames")
 
 let times: [CMTime] = (0..<frameCount).map { i in
-    let t = durSec * Double(i) / Double(frameCount - 1)
+    let t = startSec + (endSec - startSec) * Double(i) / Double(frameCount - 1)
     return CMTime(seconds: t, preferredTimescale: 600)
 }
 

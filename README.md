@@ -1,7 +1,7 @@
 # sky-bg
 
 <p align="center">
-  <img src="docs/preview.gif" alt="Animated stitched preview: WBB rooftop time-lapse fit across the three-monitor virtual canvas, blurred and color-graded, sliced per display with bezel gaps." width="900">
+  <img src="docs/preview.gif" alt="Animated stitched preview: ~12h WBB rooftop time-lapse fit across the three-monitor virtual canvas, blurred and color-graded, sliced per display with bezel gaps." width="900">
 </p>
 
 Pulls a webcam frame on an interval (JPEG endpoint or the last frame of an MP4/MOV), fits it onto the virtual desktop arrangement, slices out each monitor's region, and sets it as the macOS wallpaper across a multi-monitor setup. Runs as a `launchd` user agent.
@@ -101,7 +101,18 @@ CANVAS_ANCHOR=top ./test/run-once.sh    # any env var overrides the config defau
 ./scripts/gen-preview.sh                # refresh docs/preview.gif from the live MP4
 ```
 
-`gen-preview.sh` is a separate dev tool — it sources `config.sh` so the rendered preview matches the live wallpaper config, but it doesn't touch `bin/skybg`, the cache, or the launchd agent. Knobs (`GIF_FRAMES`, `GIF_DELAY_MS`, `GIF_TARGET_WIDTH`, `GIF_BEZEL_PX`, `GIF_OUT`) are env-overridable, defaults are tuned for the README artifact.
+`gen-preview.sh` is a separate dev tool — it sources `config.sh` so the rendered canvas (fit/anchor/blur/color) matches the live wallpaper, but it doesn't touch `bin/skybg`, the cache, or the launchd agent. It defaults to `wbbs_cam_day.mp4` (the 24h time-lapse, ~58 MB) regardless of `config.sh`'s `WEBCAM_URL`, then samples the middle `GIF_SPAN_FRAC` (default 0.5 → ~12h centered on the timeline midpoint) so a single loop captures the daylight arc without the dark-of-night extremes. Tunables (env-overridable):
+
+| Var                | Default | Notes                                                    |
+|--------------------|---------|----------------------------------------------------------|
+| `WEBCAM_URL`       | day mp4 | any MP4/MOV; runtime `config.sh` value can be overridden |
+| `GIF_FRAMES`       | 36      | total frames sampled across the window                   |
+| `GIF_DELAY_MS`     | 120     | per-frame delay; loop length = frames × delay            |
+| `GIF_SPAN_FRAC`    | 0.5     | fraction of source timeline to cover (0..1)              |
+| `GIF_SPAN_CENTER`  | 0.5     | where that window sits (0=video start, 1=video end)      |
+| `GIF_TARGET_WIDTH` | 1100    | output width in px; height auto-derived from canvas      |
+| `GIF_BEZEL_PX`     | 6       | gap drawn around each monitor slice                      |
+| `GIF_OUT`          | `docs/preview.gif` | output path (relative to repo root)           |
 
 ## Install
 
