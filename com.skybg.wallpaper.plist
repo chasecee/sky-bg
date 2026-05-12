@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.skybg.wallpaper</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__PROJECT_DIR__/bin/skybg</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>WEBCAM_URL</key>
+    <string>__WEBCAM_URL__</string>
+    <key>CACHE_DIR</key>
+    <string>__CACHE_DIR__</string>
+    <key>LOG_LEVEL</key>
+    <string>__LOG_LEVEL__</string>
+    <key>RAW_CROP_TOP</key>
+    <string>__RAW_CROP_TOP__</string>
+    <key>CANVAS_FIT</key>
+    <string>__CANVAS_FIT__</string>
+    <key>CANVAS_ANCHOR</key>
+    <string>__CANVAS_ANCHOR__</string>
+    <key>BLUR_RADIUS</key>
+    <string>__BLUR_RADIUS__</string>
+  </dict>
+  <key>WorkingDirectory</key>
+  <string>__PROJECT_DIR__</string>
+  <key>StartInterval</key>
+  <integer>__INTERVAL__</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>__LOG_DIR__/stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_DIR__/stderr.log</string>
+</dict>
+</plist>
