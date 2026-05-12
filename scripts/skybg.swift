@@ -218,8 +218,9 @@ func makeBlurMask(stops: [Double], width: CGFloat, height: CGFloat) -> CIImage {
 func cleanupOldCycles(in dir: URL, keep: Set<URL>) {
     let fm = FileManager.default
     guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
+    // Match any wallpaper-* file (covers legacy .jpg outputs from older cycles too).
     for url in entries
-    where url.lastPathComponent.hasPrefix("wallpaper-") && url.pathExtension == "jpg" && !keep.contains(url) {
+    where url.lastPathComponent.hasPrefix("wallpaper-") && !keep.contains(url) {
         try? fm.removeItem(at: url)
     }
 }
@@ -320,21 +321,25 @@ func processCanvas(src: CIImage, monitors: [Monitor], cfg: Config) -> [(Monitor,
             .transformed(by: CGAffineTransform(scaleX: sx, y: sy))
 
         let outRect = CGRect(x: 0, y: 0, width: CGFloat(m.widthPx), height: CGFloat(m.heightPx))
-        guard let cg = ctx.createCGImage(img, from: outRect) else {
-            die("createCGImage failed for \(m.label)")
-        }
-        let rep = NSBitmapImageRep(cgImage: cg)
-        guard let data = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.9]) else {
-            die("jpeg encode failed for \(m.label)")
-        }
+        let positioned = img.cropped(to: outRect)
         // Alternate A/B slot per monitor: WindowServer treats it as a fresh path
         // every cycle (so the wallpaper actually refreshes), but the system's
-        // "Recent Wallpapers" list stays capped at 2 entries per display instead
-        // of growing unboundedly with cycle-suffixed filenames.
+        // "Recent Wallpapers" list stays capped at 2 entries per display.
         let currentName = NSWorkspace.shared.desktopImageURL(for: m.screen)?.lastPathComponent ?? ""
-        let nextSlot = currentName.hasSuffix("-A.jpg") ? "B" : "A"
-        let outURL = cfg.cacheDir.appendingPathComponent("wallpaper-\(m.id)-\(nextSlot).jpg")
-        do { try data.write(to: outURL) } catch { die("write failed for \(m.label): \(error)") }
+        let nextSlot = currentName.hasSuffix("-A.heic") ? "B" : "A"
+        let outURL = cfg.cacheDir.appendingPathComponent("wallpaper-\(m.id)-\(nextSlot).heic")
+        // HEIF 10-bit + Display P3 — 1024 values per channel kills the banding
+        // 8-bit JPEG produces in smooth sky gradients.
+        do {
+            try ctx.writeHEIF10Representation(
+                of: positioned,
+                to: outURL,
+                colorSpace: CGColorSpace(name: CGColorSpace.displayP3) ?? CGColorSpace(name: CGColorSpace.sRGB)!,
+                options: [:]
+            )
+        } catch {
+            die("HEIF10 encode failed for \(m.label): \(error)")
+        }
         results.append((m, outURL))
     }
     return results
