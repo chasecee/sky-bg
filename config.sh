@@ -4,7 +4,7 @@
 
 WEBCAM_URL="${WEBCAM_URL:-https://horel.chpc.utah.edu/data/station_cameras/wbbs_cam/wbbs_cam_current.jpg}"
 
-INTERVAL_SEC="${INTERVAL_SEC:-300}"
+INTERVAL_SEC="${INTERVAL_SEC:-60}"
 
 PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 CACHE_DIR="${CACHE_DIR:-$PROJECT_DIR/.cache}"
