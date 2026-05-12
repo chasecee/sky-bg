@@ -4,7 +4,7 @@
 
 WEBCAM_URL="${WEBCAM_URL:-https://horel.chpc.utah.edu/data/station_cameras/wbbs_cam/wbbs_cam_current.jpg}"
 
-INTERVAL_SEC="${INTERVAL_SEC:-60}"
+INTERVAL_SEC="${INTERVAL_SEC:-300}"
 
 PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 CACHE_DIR="${CACHE_DIR:-$PROJECT_DIR/.cache}"
@@ -22,10 +22,10 @@ CANVAS_FIT="${CANVAS_FIT:-cover}"
 CANVAS_ANCHOR="${CANVAS_ANCHOR:-center}"
 
 # Gaussian blur radius applied to the canvas before slicing. 0 = sharp.
-BLUR_RADIUS="${BLUR_RADIUS:-16}"
+BLUR_RADIUS="${BLUR_RADIUS:-20}"
 
 # CIColorControls. Saturation: multiplier (1.0 unchanged). Brightness: additive offset (0.0 unchanged).
-COLOR_SATURATION="${COLOR_SATURATION:-1.10}"
+COLOR_SATURATION="${COLOR_SATURATION:-1.05}"
 COLOR_BRIGHTNESS="${COLOR_BRIGHTNESS:--0.04}"
 
 mkdir -p "$CACHE_DIR" "$LOG_DIR"

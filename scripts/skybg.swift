@@ -237,14 +237,20 @@ let outputs = processCanvas(src: src, monitors: monitors, cfg: cfg)
 if cfg.noApply {
     log("info", "SKYBG_NO_APPLY=1, skipping wallpaper set")
 } else {
-    for (m, url) in outputs {
+    let errLock = NSLock()
+    var firstErr: String? = nil
+    DispatchQueue.concurrentPerform(iterations: outputs.count) { i in
+        let (m, url) = outputs[i]
         log("info", "set \(m.label) (id=\(m.id)) -> \(url.lastPathComponent)")
         do {
             try NSWorkspace.shared.setDesktopImageURL(url, for: m.screen, options: [:])
         } catch {
-            die("setDesktopImageURL failed for \(m.label): \(error)")
+            errLock.lock()
+            if firstErr == nil { firstErr = "setDesktopImageURL failed for \(m.label): \(error)" }
+            errLock.unlock()
         }
     }
+    if let err = firstErr { die(err) }
     cleanupOldCycles(in: cfg.cacheDir, keep: Set(outputs.map { $0.1 }))
 }
 
