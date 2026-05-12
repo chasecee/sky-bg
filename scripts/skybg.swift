@@ -8,7 +8,8 @@
 //   RAW_CROP_TOP    : pixels trimmed off the top of the source (default 0)
 //   CANVAS_FIT      : cover | contain                          (default cover)
 //   CANVAS_ANCHOR   : center | top | bottom | left | right     (default center)
-//   BLUR_RADIUS     : Gaussian blur radius applied to canvas   (default 0)
+//   BLUR_RADIUS     : blur radius; single value or comma list  (default 0)
+//                     of stops top->bottom (e.g. "10,50")
 //   COLOR_SATURATION: CIColorControls saturation multiplier    (default 1.0)
 //   COLOR_BRIGHTNESS: CIColorControls brightness offset        (default 0.0)
 //   SKYBG_NO_APPLY  : "1" to skip the wallpaper-set phase      (default unset)
@@ -16,6 +17,7 @@
 import Foundation
 import CoreImage
 import AppKit
+import CryptoKit
 
 let levels = ["debug": 0, "info": 1, "warn": 2, "error": 3]
 let curLevel = levels[ProcessInfo.processInfo.environment["LOG_LEVEL"]?.lowercased() ?? ""] ?? 1
@@ -32,13 +34,32 @@ func log(_ level: String, _ msg: String) {
 
 func die(_ msg: String) -> Never { log("error", msg); exit(1) }
 
+// Rotate stderr/stdout once they exceed the cap. launchd holds the inode FD;
+// renaming sends the rest of this cycle's output to the .1 file, and the next
+// cycle's launchd start opens a fresh stderr.log. Default 5 MB ≈ 35 days at
+// 5-min intervals.
+func rotateLogs() {
+    guard let logDir = ProcessInfo.processInfo.environment["LOG_DIR"] else { return }
+    let maxBytes = Int64(ProcessInfo.processInfo.environment["LOG_MAX_BYTES"] ?? "") ?? 5_242_880
+    let fm = FileManager.default
+    for name in ["stderr.log", "stdout.log"] {
+        let path = (logDir as NSString).appendingPathComponent(name)
+        let size = ((try? fm.attributesOfItem(atPath: path))?[.size] as? Int64) ?? 0
+        if size > maxBytes {
+            let archived = path + ".1"
+            try? fm.removeItem(atPath: archived)
+            try? fm.moveItem(atPath: path, toPath: archived)
+        }
+    }
+}
+
 struct Config {
     let webcamURL: URL
     let cacheDir: URL
     let cropTop: CGFloat
     let fit: String
     let anchor: String
-    let blur: Double
+    let blurStops: [Double]
     let saturation: Double
     let brightness: Double
     let noApply: Bool
@@ -51,13 +72,16 @@ struct Config {
         guard let cacheStr = env["CACHE_DIR"] else { die("CACHE_DIR must be set") }
         let cacheURL = URL(fileURLWithPath: cacheStr)
         try? FileManager.default.createDirectory(at: cacheURL, withIntermediateDirectories: true)
+        let stops = (env["BLUR_RADIUS"] ?? "0")
+            .split(separator: ",")
+            .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
         return Config(
             webcamURL: url,
             cacheDir: cacheURL,
             cropTop: CGFloat(Int(env["RAW_CROP_TOP"] ?? "0") ?? 0),
             fit: (env["CANVAS_FIT"] ?? "cover").lowercased(),
             anchor: (env["CANVAS_ANCHOR"] ?? "center").lowercased(),
-            blur: Double(env["BLUR_RADIUS"] ?? "0") ?? 0,
+            blurStops: stops.isEmpty ? [0] : stops,
             saturation: Double(env["COLOR_SATURATION"] ?? "1.0") ?? 1.0,
             brightness: Double(env["COLOR_BRIGHTNESS"] ?? "0.0") ?? 0.0,
             noApply: env["SKYBG_NO_APPLY"] == "1"
@@ -108,6 +132,35 @@ func fetchJPEG(url: URL, timeout: TimeInterval = 30) -> Data {
     sem.wait()
     if let e = err { die("fetch failed: \(e)") }
     return result!
+}
+
+// Vertical grayscale gradient sized to the canvas. stops[0] is the top,
+// stops.last is the bottom; intermediate values are spaced evenly. Brightness
+// is normalized to maxStop so it can drive CIMaskedVariableBlur's inputRadius.
+func makeBlurMask(stops: [Double], width: CGFloat, height: CGFloat) -> CIImage {
+    let w = max(2, Int(width.rounded(.up)))
+    let h = max(2, Int(height.rounded(.up)))
+    let maxStop = stops.max() ?? 1.0
+    let cs = CGColorSpaceCreateDeviceGray()
+    guard let ctx = CGContext(
+        data: nil, width: w, height: h, bitsPerComponent: 8,
+        bytesPerRow: w, space: cs, bitmapInfo: CGImageAlphaInfo.none.rawValue
+    ) else { die("CGContext for blur mask failed") }
+    var components: [CGFloat] = []
+    for s in stops { components.append(CGFloat(s / maxStop)); components.append(1.0) }
+    let n = stops.count
+    let locations: [CGFloat] = (0..<n).map { n == 1 ? 0 : CGFloat(Double($0) / Double(n - 1)) }
+    guard let gradient = CGGradient(
+        colorSpace: cs, colorComponents: components, locations: locations, count: n
+    ) else { die("CGGradient for blur mask failed") }
+    ctx.drawLinearGradient(
+        gradient,
+        start: CGPoint(x: 0, y: CGFloat(h)),
+        end: CGPoint(x: 0, y: 0),
+        options: [.drawsBeforeStartLocation, .drawsAfterEndLocation]
+    )
+    guard let cg = ctx.makeImage() else { die("CGImage for blur mask failed") }
+    return CIImage(cgImage: cg)
 }
 
 func cleanupOldCycles(in dir: URL, keep: Set<URL>) {
@@ -174,12 +227,29 @@ func processCanvas(src: CIImage, monitors: [Monitor], cfg: Config) -> [(Monitor,
     }
 
     let canvas: CIImage
-    if cfg.blur > 0 {
-        guard let blurred = CIFilter(
-            name: "CIGaussianBlur",
-            parameters: [kCIInputImageKey: working.clampedToExtent(), kCIInputRadiusKey: cfg.blur]
-        )?.outputImage else { die("CIGaussianBlur failed") }
-        canvas = blurred
+    let maxStop = cfg.blurStops.max() ?? 0
+    let uniform = Set(cfg.blurStops).count == 1
+    if maxStop > 0 {
+        let clamped = working.clampedToExtent()
+        if uniform {
+            guard let blurred = CIFilter(
+                name: "CIGaussianBlur",
+                parameters: [kCIInputImageKey: clamped, kCIInputRadiusKey: maxStop]
+            )?.outputImage else { die("CIGaussianBlur failed") }
+            canvas = blurred
+        } else {
+            let mask = makeBlurMask(stops: cfg.blurStops, width: canvasW, height: canvasH)
+                .clampedToExtent()
+            guard let blurred = CIFilter(
+                name: "CIMaskedVariableBlur",
+                parameters: [
+                    kCIInputImageKey: clamped,
+                    "inputMask": mask,
+                    kCIInputRadiusKey: maxStop,
+                ]
+            )?.outputImage else { die("CIMaskedVariableBlur failed") }
+            canvas = blurred
+        }
     } else {
         canvas = working
     }
@@ -217,11 +287,29 @@ func processCanvas(src: CIImage, monitors: [Monitor], cfg: Config) -> [(Monitor,
 // changed. A fresh path per cycle forces a real refresh.
 let cycle = String(Int(Date().timeIntervalSince1970))
 
+rotateLogs()
+
 let cfg = Config.fromEnv()
+
+// Persist cache dir so SkyBg.saver can find wallpaper-<id>-*.jpg without hardcoding paths.
+let supportDir = NSString(string: "~/Library/Application Support/com.skybg").expandingTildeInPath
+try? FileManager.default.createDirectory(atPath: supportDir, withIntermediateDirectories: true)
+try? cfg.cacheDir.path.write(toFile: "\(supportDir)/cache_path", atomically: true, encoding: .utf8)
 
 log("info", "fetch \(cfg.webcamURL.absoluteString)")
 let jpeg = fetchJPEG(url: cfg.webcamURL)
 log("debug", "raw \(jpeg.count) bytes")
+
+// Skip the rest of the pipeline if the bytes match the last cycle. install.sh
+// deletes last-hash so any config edit forces a re-process on the next cycle.
+let hashHex = SHA256.hash(data: jpeg).compactMap { String(format: "%02x", $0) }.joined()
+let hashFile = cfg.cacheDir.appendingPathComponent("last-hash")
+if let prev = try? String(contentsOf: hashFile, encoding: .utf8),
+   prev.trimmingCharacters(in: .whitespacesAndNewlines) == hashHex {
+    log("info", "source unchanged (sha=\(hashHex.prefix(12))), skipping")
+    exit(0)
+}
+try? hashHex.write(to: hashFile, atomically: true, encoding: .utf8)
 
 let rawURL = cfg.cacheDir.appendingPathComponent("raw.jpg")
 do { try jpeg.write(to: rawURL) } catch { die("could not write raw.jpg: \(error)") }
@@ -230,7 +318,7 @@ guard let src = CIImage(contentsOf: rawURL) else { die("could not parse raw imag
 let monitors = detectMonitors()
 guard !monitors.isEmpty else { die("no displays detected") }
 log("info", "displays: " + monitors.map { "\($0.label)#\($0.id) \($0.widthPx)x\($0.heightPx)" }.joined(separator: ", "))
-log("info", "process fit=\(cfg.fit) anchor=\(cfg.anchor) blur=\(cfg.blur) sat=\(cfg.saturation) bri=\(cfg.brightness) crop_top=\(Int(cfg.cropTop))")
+log("info", "process fit=\(cfg.fit) anchor=\(cfg.anchor) blur=\(cfg.blurStops) sat=\(cfg.saturation) bri=\(cfg.brightness) crop_top=\(Int(cfg.cropTop))")
 
 let outputs = processCanvas(src: src, monitors: monitors, cfg: cfg)
 

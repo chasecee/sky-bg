@@ -32,12 +32,16 @@ sky-bg/
 ├── com.skybg.wallpaper.plist  # launchd template (placeholders substituted by install.sh)
 ├── scripts/
 │   ├── skybg.swift            # the whole runtime pipeline
+│   ├── screensaver.swift      # SkyBgScreenSaverView source for the .saver bundle
 │   ├── build.sh               # swiftc -O scripts/skybg.swift -o bin/skybg
+│   ├── build-saver.sh         # build SkyBg.saver bundle (ad-hoc signed)
 │   ├── install.sh             # build + render plist + launchctl bootstrap (--unload to remove)
+│   ├── install-saver.sh       # copy SkyBg.saver into ~/Library/Screen Savers/
 │   └── detect.sh              # debug: dump the current NSScreen arrangement
 ├── test/
 │   └── run-once.sh            # rebuild + run once (--watch, --no-set)
 ├── bin/skybg                  # built locally, gitignored
+├── SkyBg.saver/               # built locally, gitignored
 ├── .cache/                    # raw + per-monitor JPEGs (gitignored)
 └── .logs/                     # launchd stdout/stderr (gitignored)
 ```
@@ -53,7 +57,7 @@ All knobs live in `config.sh` (overridable via env). The binary reads them from 
 | `RAW_CROP_TOP`  | 8                | trims the webcam's timestamp banner                         |
 | `CANVAS_FIT`    | cover            | `cover` fills (crops overflow) / `contain` letterboxes      |
 | `CANVAS_ANCHOR` | bottom           | `center | top | bottom | left | right`                     |
-| `BLUR_RADIUS`   | 20               | `CIGaussianBlur` radius. 0 = sharp                          |
+| `BLUR_RADIUS`   | 10,58            | radius; single value = uniform, comma list = top->bottom    |
 | `LOG_LEVEL`     | info             | `debug | info | warn | error`                               |
 
 ## Dev workflow
@@ -79,6 +83,21 @@ CANVAS_ANCHOR=top ./test/run-once.sh    # any env var overrides the config defau
 The agent runs at load and every `INTERVAL_SEC`. Logs land in `.logs/stdout.log` and `.logs/stderr.log`.
 
 After editing `config.sh`, re-run `./scripts/install.sh` to re-render the plist and reload.
+
+## Screensaver (optional)
+
+A companion `.saver` bundle (`SkyBg.saver`) shows the same per-monitor slice during screensaver mode, so the wallpaper region stays pixel-identical when macOS activates/deactivates the screensaver. You'll still see the standard system fade and chrome (dock, icons, windows) appearing/disappearing — those aren't suppressible — but the background image content is continuous.
+
+Build, install, and pick it once:
+
+```bash
+./scripts/build-saver.sh                          # compiles + ad-hoc signs SkyBg.saver/
+./scripts/install-saver.sh                         # copies into ~/Library/Screen Savers/
+open 'x-apple.systempreferences:com.apple.Lock-Screen-Settings.extension'
+# scroll to Screen Saver, pick "SkyBg"
+```
+
+The screensaver discovers the cache by reading `~/Library/Application Support/com.skybg/cache_path`, which `bin/skybg` writes on every cycle. No hardcoded paths.
 
 ## Notes
 

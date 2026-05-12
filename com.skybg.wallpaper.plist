@@ -14,6 +14,8 @@
     <string>__WEBCAM_URL__</string>
     <key>CACHE_DIR</key>
     <string>__CACHE_DIR__</string>
+    <key>LOG_DIR</key>
+    <string>__LOG_DIR__</string>
     <key>LOG_LEVEL</key>
     <string>__LOG_LEVEL__</string>
     <key>RAW_CROP_TOP</key>

@@ -42,6 +42,8 @@ sed \
   -e "s|__COLOR_BRIGHTNESS__|$COLOR_BRIGHTNESS|g" \
   "$PLIST_SRC" > "$PLIST_DST"
 
+rm -f "$CACHE_DIR/last-hash"
+
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
 launchctl bootstrap "$DOMAIN" "$PLIST_DST"
 launchctl enable "$DOMAIN/$LABEL"
