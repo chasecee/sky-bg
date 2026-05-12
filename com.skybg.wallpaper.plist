@@ -24,6 +24,10 @@
     <string>__CANVAS_ANCHOR__</string>
     <key>BLUR_RADIUS</key>
     <string>__BLUR_RADIUS__</string>
+    <key>COLOR_SATURATION</key>
+    <string>__COLOR_SATURATION__</string>
+    <key>COLOR_BRIGHTNESS</key>
+    <string>__COLOR_BRIGHTNESS__</string>
   </dict>
   <key>WorkingDirectory</key>
   <string>__PROJECT_DIR__</string>

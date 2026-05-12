@@ -9,6 +9,8 @@
 //   CANVAS_FIT      : cover | contain                          (default cover)
 //   CANVAS_ANCHOR   : center | top | bottom | left | right     (default center)
 //   BLUR_RADIUS     : Gaussian blur radius applied to canvas   (default 0)
+//   COLOR_SATURATION: CIColorControls saturation multiplier    (default 1.0)
+//   COLOR_BRIGHTNESS: CIColorControls brightness offset        (default 0.0)
 //   SKYBG_NO_APPLY  : "1" to skip the wallpaper-set phase      (default unset)
 
 import Foundation
@@ -37,6 +39,8 @@ struct Config {
     let fit: String
     let anchor: String
     let blur: Double
+    let saturation: Double
+    let brightness: Double
     let noApply: Bool
 
     static func fromEnv() -> Config {
@@ -54,6 +58,8 @@ struct Config {
             fit: (env["CANVAS_FIT"] ?? "cover").lowercased(),
             anchor: (env["CANVAS_ANCHOR"] ?? "center").lowercased(),
             blur: Double(env["BLUR_RADIUS"] ?? "0") ?? 0,
+            saturation: Double(env["COLOR_SATURATION"] ?? "1.0") ?? 1.0,
+            brightness: Double(env["COLOR_BRIGHTNESS"] ?? "0.0") ?? 0.0,
             noApply: env["SKYBG_NO_APPLY"] == "1"
         )
     }
@@ -104,6 +110,15 @@ func fetchJPEG(url: URL, timeout: TimeInterval = 30) -> Data {
     return result!
 }
 
+func cleanupOldCycles(in dir: URL, keep: Set<URL>) {
+    let fm = FileManager.default
+    guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
+    for url in entries
+    where url.lastPathComponent.hasPrefix("wallpaper-") && url.pathExtension == "jpg" && !keep.contains(url) {
+        try? fm.removeItem(at: url)
+    }
+}
+
 func processCanvas(src: CIImage, monitors: [Monitor], cfg: Config) -> [(Monitor, URL)] {
     let srcExt = src.extent
     guard srcExt.height > cfg.cropTop else { die("RAW_CROP_TOP \(cfg.cropTop) >= source height \(srcExt.height)") }
@@ -141,19 +156,32 @@ func processCanvas(src: CIImage, monitors: [Monitor], cfg: Config) -> [(Monitor,
     default:       die("unknown CANVAS_ANCHOR: \(cfg.anchor)")
     }
 
-    let mapped = trimmed
+    var working = trimmed
         .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         .transformed(by: CGAffineTransform(translationX: offsetX, y: offsetY))
+
+    if cfg.saturation != 1.0 || cfg.brightness != 0.0 {
+        guard let adjusted = CIFilter(
+            name: "CIColorControls",
+            parameters: [
+                kCIInputImageKey: working,
+                kCIInputSaturationKey: cfg.saturation,
+                kCIInputBrightnessKey: cfg.brightness,
+                kCIInputContrastKey: 1.0,
+            ]
+        )?.outputImage else { die("CIColorControls failed") }
+        working = adjusted
+    }
 
     let canvas: CIImage
     if cfg.blur > 0 {
         guard let blurred = CIFilter(
             name: "CIGaussianBlur",
-            parameters: [kCIInputImageKey: mapped.clampedToExtent(), kCIInputRadiusKey: cfg.blur]
+            parameters: [kCIInputImageKey: working.clampedToExtent(), kCIInputRadiusKey: cfg.blur]
         )?.outputImage else { die("CIGaussianBlur failed") }
         canvas = blurred
     } else {
-        canvas = mapped
+        canvas = working
     }
 
     let ctx = CIContext(options: nil)
@@ -177,12 +205,17 @@ func processCanvas(src: CIImage, monitors: [Monitor], cfg: Config) -> [(Monitor,
         guard let data = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.9]) else {
             die("jpeg encode failed for \(m.label)")
         }
-        let outURL = cfg.cacheDir.appendingPathComponent("wallpaper-\(m.id).jpg")
+        let outURL = cfg.cacheDir.appendingPathComponent("wallpaper-\(m.id)-\(cycle).jpg")
         do { try data.write(to: outURL) } catch { die("write failed for \(m.label): \(error)") }
         results.append((m, outURL))
     }
     return results
 }
+
+// Cycle tag burned into output filenames. The WindowServer caches wallpapers by
+// file path, so re-setting the same path is a visual no-op even when the bytes
+// changed. A fresh path per cycle forces a real refresh.
+let cycle = String(Int(Date().timeIntervalSince1970))
 
 let cfg = Config.fromEnv()
 
@@ -197,7 +230,7 @@ guard let src = CIImage(contentsOf: rawURL) else { die("could not parse raw imag
 let monitors = detectMonitors()
 guard !monitors.isEmpty else { die("no displays detected") }
 log("info", "displays: " + monitors.map { "\($0.label)#\($0.id) \($0.widthPx)x\($0.heightPx)" }.joined(separator: ", "))
-log("info", "process fit=\(cfg.fit) anchor=\(cfg.anchor) blur=\(cfg.blur) crop_top=\(Int(cfg.cropTop))")
+log("info", "process fit=\(cfg.fit) anchor=\(cfg.anchor) blur=\(cfg.blur) sat=\(cfg.saturation) bri=\(cfg.brightness) crop_top=\(Int(cfg.cropTop))")
 
 let outputs = processCanvas(src: src, monitors: monitors, cfg: cfg)
 
@@ -205,13 +238,14 @@ if cfg.noApply {
     log("info", "SKYBG_NO_APPLY=1, skipping wallpaper set")
 } else {
     for (m, url) in outputs {
-        log("info", "set \(m.label) (id=\(m.id)) -> \(url.path)")
+        log("info", "set \(m.label) (id=\(m.id)) -> \(url.lastPathComponent)")
         do {
             try NSWorkspace.shared.setDesktopImageURL(url, for: m.screen, options: [:])
         } catch {
             die("setDesktopImageURL failed for \(m.label): \(error)")
         }
     }
+    cleanupOldCycles(in: cfg.cacheDir, keep: Set(outputs.map { $0.1 }))
 }
 
 log("info", "done")

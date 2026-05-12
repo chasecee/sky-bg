@@ -22,6 +22,10 @@ CANVAS_FIT="${CANVAS_FIT:-cover}"
 CANVAS_ANCHOR="${CANVAS_ANCHOR:-center}"
 
 # Gaussian blur radius applied to the canvas before slicing. 0 = sharp.
-BLUR_RADIUS="${BLUR_RADIUS:-20}"
+BLUR_RADIUS="${BLUR_RADIUS:-16}"
+
+# CIColorControls. Saturation: multiplier (1.0 unchanged). Brightness: additive offset (0.0 unchanged).
+COLOR_SATURATION="${COLOR_SATURATION:-1.10}"
+COLOR_BRIGHTNESS="${COLOR_BRIGHTNESS:--0.04}"
 
 mkdir -p "$CACHE_DIR" "$LOG_DIR"

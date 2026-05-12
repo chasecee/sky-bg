@@ -38,6 +38,8 @@ sed \
   -e "s|__CANVAS_FIT__|$CANVAS_FIT|g" \
   -e "s|__CANVAS_ANCHOR__|$CANVAS_ANCHOR|g" \
   -e "s|__BLUR_RADIUS__|$BLUR_RADIUS|g" \
+  -e "s|__COLOR_SATURATION__|$COLOR_SATURATION|g" \
+  -e "s|__COLOR_BRIGHTNESS__|$COLOR_BRIGHTNESS|g" \
   "$PLIST_SRC" > "$PLIST_DST"
 
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
