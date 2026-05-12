@@ -8,7 +8,7 @@
 //   LOG_LEVEL       : debug | info | warn | error            (default info)
 //   RAW_CROP_TOP    : pixels trimmed off the top of the source (default 0)
 //   CANVAS_FIT      : cover | contain                          (default cover)
-//   CANVAS_ANCHOR   : center | top | bottom | left | right     (default center)
+//   CANVAS_ANCHOR   : vertical anchor 0..1 (0=bottom, 1=top)   (default 0.5)
 //   BLUR_RADIUS     : blur radius; single value or comma list  (default 0)
 //                     of stops top->bottom (e.g. "10,50")
 //   COLOR_SATURATION: CIColorControls saturation multiplier    (default 1.0)
@@ -60,7 +60,7 @@ struct Config {
     let cacheDir: URL
     let cropTop: CGFloat
     let fit: String
-    let anchor: String
+    let anchor: Double
     let blurStops: [Double]
     let saturation: Double
     let brightness: Double
@@ -82,7 +82,7 @@ struct Config {
             cacheDir: cacheURL,
             cropTop: CGFloat(Int(env["RAW_CROP_TOP"] ?? "0") ?? 0),
             fit: (env["CANVAS_FIT"] ?? "cover").lowercased(),
-            anchor: (env["CANVAS_ANCHOR"] ?? "center").lowercased(),
+            anchor: min(1, max(0, Double(env["CANVAS_ANCHOR"] ?? "0.5") ?? 0.5)),
             blurStops: stops.isEmpty ? [0] : stops,
             saturation: Double(env["COLOR_SATURATION"] ?? "1.0") ?? 1.0,
             brightness: Double(env["COLOR_BRIGHTNESS"] ?? "0.0") ?? 0.0,
@@ -252,15 +252,8 @@ func processCanvas(src: CIImage, monitors: [Monitor], cfg: Config) -> [(Monitor,
     let scaledW = srcW * scale
     let scaledH = srcH * scale
 
-    let offsetX, offsetY: CGFloat
-    switch cfg.anchor {
-    case "center": (offsetX, offsetY) = ((canvasW - scaledW)/2, (canvasH - scaledH)/2)
-    case "top":    (offsetX, offsetY) = ((canvasW - scaledW)/2, canvasH - scaledH)
-    case "bottom": (offsetX, offsetY) = ((canvasW - scaledW)/2, 0)
-    case "left":   (offsetX, offsetY) = (0, (canvasH - scaledH)/2)
-    case "right":  (offsetX, offsetY) = (canvasW - scaledW, (canvasH - scaledH)/2)
-    default:       die("unknown CANVAS_ANCHOR: \(cfg.anchor)")
-    }
+    let offsetX = (canvasW - scaledW) / 2
+    let offsetY = CGFloat(cfg.anchor) * (canvasH - scaledH)
 
     var working = trimmed
         .transformed(by: CGAffineTransform(scaleX: scale, y: scale))

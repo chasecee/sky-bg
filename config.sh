@@ -7,7 +7,7 @@
 # moov + last-frame samples faster. The last frame of the video is what we render.
 WEBCAM_URL="${WEBCAM_URL:-https://horel.chpc.utah.edu/data/station_cameras/wbbs_cam/wbbs_cam_hour.mp4}"
 
-INTERVAL_SEC="${INTERVAL_SEC:-60}"
+INTERVAL_SEC="${INTERVAL_SEC:-120}"
 
 PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 CACHE_DIR="${CACHE_DIR:-$PROJECT_DIR/.cache}"
@@ -22,8 +22,9 @@ RAW_CROP_TOP="${RAW_CROP_TOP:-22}"
 # How the source maps onto the virtual canvas: cover | contain.
 CANVAS_FIT="${CANVAS_FIT:-cover}"
 
-# Where to pin the source within the canvas: center | top | bottom | left | right.
-CANVAS_ANCHOR="${CANVAS_ANCHOR:-bottom}"
+# Vertical anchor of the source within the canvas: 0 = bottom, 0.5 = center, 1 = top.
+# Horizontal is always centered.
+CANVAS_ANCHOR="${CANVAS_ANCHOR:-0.333}"
 
 # Blur radius applied before slicing. Single value = uniform.
 # Comma list = progressive top->bottom, evenly distributed (e.g. "10,50" or "10,30,50"). 0 = sharp.

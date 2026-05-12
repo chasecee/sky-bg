@@ -69,7 +69,7 @@ All knobs live in `config.sh` (overridable via env). The binary reads them from 
 | `INTERVAL_SEC`     | 60                   | launchd `StartInterval`                                     |
 | `RAW_CROP_TOP`     | 22                   | trims the timestamp banner; tuned to the 1280×960 mp4       |
 | `CANVAS_FIT`       | cover                | `cover` fills (crops overflow) / `contain` letterboxes      |
-| `CANVAS_ANCHOR`    | center               | `center | top | bottom | left | right`                     |
+| `CANVAS_ANCHOR`    | 0.25                 | vertical anchor 0..1 (0=bottom, 0.5=center, 1=top); horiz always centered |
 | `BLUR_RADIUS`      | `5,20`               | scalar = uniform; comma list = top→bottom gradient stops    |
 | `COLOR_SATURATION` | 1.05                 | CIColorControls multiplier; 1.0 = unchanged                 |
 | `COLOR_BRIGHTNESS` | -0.04                | CIColorControls additive offset; 0.0 = unchanged            |
@@ -96,7 +96,7 @@ chmod +x scripts/*.sh test/*.sh
 ./test/run-once.sh --no-set             # skip the wallpaper-set phase (sets SKYBG_NO_APPLY)
 ./test/run-once.sh --watch              # rebuild + re-run on file change (needs fswatch)
 LOG_LEVEL=debug ./test/run-once.sh      # verbose
-CANVAS_ANCHOR=top ./test/run-once.sh    # any env var overrides the config default
+CANVAS_ANCHOR=1 ./test/run-once.sh      # any env var overrides the config default
 ./scripts/detect.sh                     # dump current display arrangement
 ./scripts/gen-preview.sh                # refresh docs/preview.gif from the live MP4
 ```

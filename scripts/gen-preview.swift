@@ -11,7 +11,7 @@
 //   GIF_TARGET_WIDTH  1100
 //   GIF_BEZEL_PX      6
 //   GIF_SPAN_FRAC     0.5    — fraction of source video timeline to sample
-//   GIF_SPAN_CENTER   0.5    — where that window sits (0=start, 1=end)
+//   GIF_SPAN_CENTER   0.7    — where that window sits (0=start, 1=end)
 //   GIF_OUT           docs/preview.gif
 
 import Foundation
@@ -46,12 +46,12 @@ let delayMs    = max(20, envInt("GIF_DELAY_MS", 120))
 let targetW    = max(200, envInt("GIF_TARGET_WIDTH", 1100))
 let bezelPx    = max(0, envInt("GIF_BEZEL_PX", 6))
 let spanFrac   = min(1.0, max(0.05, envDouble("GIF_SPAN_FRAC", 0.5)))
-let spanCenter = min(1.0, max(0.0, envDouble("GIF_SPAN_CENTER", 0.5)))
+let spanCenter = min(1.0, max(0.0, envDouble("GIF_SPAN_CENTER", 0.7)))
 let outPath    = env("GIF_OUT") ?? "docs/preview.gif"
 
 let cropTop    = CGFloat(envInt("RAW_CROP_TOP", 22))
 let fit        = (env("CANVAS_FIT") ?? "cover").lowercased()
-let anchor     = (env("CANVAS_ANCHOR") ?? "bottom").lowercased()
+let anchor     = min(1.0, max(0.0, envDouble("CANVAS_ANCHOR", 0.25)))
 let blurStops: [Double] = (env("BLUR_RADIUS") ?? "13,18")
     .split(separator: ",")
     .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
@@ -201,15 +201,8 @@ func renderStitched(_ rawCG: CGImage) -> CGImage {
     }
     let scaledW = srcW * scale
     let scaledH = srcH * scale
-    let offX, offY: CGFloat
-    switch anchor {
-    case "center": (offX, offY) = ((canvasW - scaledW)/2, (canvasH - scaledH)/2)
-    case "top":    (offX, offY) = ((canvasW - scaledW)/2, canvasH - scaledH)
-    case "bottom": (offX, offY) = ((canvasW - scaledW)/2, 0)
-    case "left":   (offX, offY) = (0, (canvasH - scaledH)/2)
-    case "right":  (offX, offY) = (canvasW - scaledW, (canvasH - scaledH)/2)
-    default:       die("unknown CANVAS_ANCHOR: \(anchor)")
-    }
+    let offX = (canvasW - scaledW) / 2
+    let offY = CGFloat(anchor) * (canvasH - scaledH)
 
     var work = trimmed
         .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
