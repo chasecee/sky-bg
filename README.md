@@ -109,7 +109,7 @@ CANVAS_ANCHOR=1 ./test/run-once.sh      # any env var overrides the config defau
 | `GIF_FRAMES`       | 36      | total frames sampled across the window                   |
 | `GIF_DELAY_MS`     | 120     | per-frame delay; loop length = frames × delay            |
 | `GIF_SPAN_FRAC`    | 0.5     | fraction of source timeline to cover (0..1)              |
-| `GIF_SPAN_CENTER`  | 0.5     | where that window sits (0=video start, 1=video end)      |
+| `GIF_SPAN_CENTER`  | 0.7     | where that window sits (0=video start, 1=video end)      |
 | `GIF_TARGET_WIDTH` | 1100    | output width in px; height auto-derived from canvas      |
 | `GIF_BEZEL_PX`     | 6       | gap drawn around each monitor slice                      |
 | `GIF_OUT`          | `docs/preview.gif` | output path (relative to repo root)           |
