@@ -1,8 +1,9 @@
-// skybg — fetch a webcam JPEG, fit it across the multi-monitor desktop arrangement,
+// skybg — fetch a webcam frame, fit it across the multi-monitor desktop arrangement,
 // slice per display, and set each slice as that display's wallpaper via NSWorkspace.
 //
 // Knobs (all from environment, set by launchd or test/run-once.sh):
-//   WEBCAM_URL      : source JPEG URL (required)
+//   WEBCAM_URL      : source URL — JPEG or MP4/MOV (required)
+//                     For video, the last frame is decoded via AVFoundation.
 //   CACHE_DIR       : where to write raw + processed images (required)
 //   LOG_LEVEL       : debug | info | warn | error            (default info)
 //   RAW_CROP_TOP    : pixels trimmed off the top of the source (default 0)
@@ -17,6 +18,7 @@
 import Foundation
 import CoreImage
 import AppKit
+import AVFoundation
 import CryptoKit
 
 let levels = ["debug": 0, "info": 1, "warn": 2, "error": 3]
@@ -112,7 +114,16 @@ func detectMonitors() -> [Monitor] {
     }
 }
 
-func fetchJPEG(url: URL, timeout: TimeInterval = 30) -> Data {
+func fetchFrameJPEG(url: URL, timeout: TimeInterval = 30) -> Data {
+    switch url.pathExtension.lowercased() {
+    case "mp4", "mov", "m4v":
+        return decodeLastVideoFrame(url: url, timeout: timeout)
+    default:
+        return fetchJPEG(url: url, timeout: timeout)
+    }
+}
+
+func fetchJPEG(url: URL, timeout: TimeInterval) -> Data {
     var req = URLRequest(url: url)
     req.timeoutInterval = timeout
     req.cachePolicy = .reloadIgnoringLocalCacheData
@@ -132,6 +143,47 @@ func fetchJPEG(url: URL, timeout: TimeInterval = 30) -> Data {
     sem.wait()
     if let e = err { die("fetch failed: \(e)") }
     return result!
+}
+
+// Decode the last frame of a remote MP4/MOV via AVFoundation. AVURLAsset uses
+// HTTP range requests under the hood, so we don't download the whole file —
+// just the moov atom plus the trailing samples needed for the final frame.
+func decodeLastVideoFrame(url: URL, timeout: TimeInterval) -> Data {
+    let asset = AVURLAsset(url: url)
+    let sem = DispatchSemaphore(value: 0)
+    var outcome: Result<CGImage, Error>!
+    Task {
+        do {
+            let dur = try await asset.load(.duration)
+            let durSec = CMTimeGetSeconds(dur)
+            guard durSec.isFinite, durSec > 0 else {
+                throw NSError(domain: "skybg", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "video duration is zero or invalid"])
+            }
+            let gen = AVAssetImageGenerator(asset: asset)
+            gen.appliesPreferredTrackTransform = true
+            gen.requestedTimeToleranceBefore = CMTime(seconds: 2, preferredTimescale: 600)
+            gen.requestedTimeToleranceAfter = .zero
+            let target = CMTimeSubtract(dur, CMTime(seconds: 0.1, preferredTimescale: 600))
+            let (cg, _) = try await gen.image(at: target)
+            outcome = .success(cg)
+        } catch {
+            outcome = .failure(error)
+        }
+        sem.signal()
+    }
+    if sem.wait(timeout: .now() + timeout) == .timedOut {
+        die("video frame decode timed out after \(Int(timeout))s")
+    }
+    switch outcome! {
+    case .failure(let e): die("video frame decode failed: \(e.localizedDescription)")
+    case .success(let cg):
+        let rep = NSBitmapImageRep(cgImage: cg)
+        guard let data = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.92]) else {
+            die("jpeg encode of decoded frame failed")
+        }
+        return data
+    }
 }
 
 // Vertical grayscale gradient sized to the canvas. stops[0] is the top,
@@ -275,29 +327,25 @@ func processCanvas(src: CIImage, monitors: [Monitor], cfg: Config) -> [(Monitor,
         guard let data = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.9]) else {
             die("jpeg encode failed for \(m.label)")
         }
-        let outURL = cfg.cacheDir.appendingPathComponent("wallpaper-\(m.id)-\(cycle).jpg")
+        // Alternate A/B slot per monitor: WindowServer treats it as a fresh path
+        // every cycle (so the wallpaper actually refreshes), but the system's
+        // "Recent Wallpapers" list stays capped at 2 entries per display instead
+        // of growing unboundedly with cycle-suffixed filenames.
+        let currentName = NSWorkspace.shared.desktopImageURL(for: m.screen)?.lastPathComponent ?? ""
+        let nextSlot = currentName.hasSuffix("-A.jpg") ? "B" : "A"
+        let outURL = cfg.cacheDir.appendingPathComponent("wallpaper-\(m.id)-\(nextSlot).jpg")
         do { try data.write(to: outURL) } catch { die("write failed for \(m.label): \(error)") }
         results.append((m, outURL))
     }
     return results
 }
 
-// Cycle tag burned into output filenames. The WindowServer caches wallpapers by
-// file path, so re-setting the same path is a visual no-op even when the bytes
-// changed. A fresh path per cycle forces a real refresh.
-let cycle = String(Int(Date().timeIntervalSince1970))
-
 rotateLogs()
 
 let cfg = Config.fromEnv()
 
-// Persist cache dir so SkyBg.saver can find wallpaper-<id>-*.jpg without hardcoding paths.
-let supportDir = NSString(string: "~/Library/Application Support/com.skybg").expandingTildeInPath
-try? FileManager.default.createDirectory(atPath: supportDir, withIntermediateDirectories: true)
-try? cfg.cacheDir.path.write(toFile: "\(supportDir)/cache_path", atomically: true, encoding: .utf8)
-
 log("info", "fetch \(cfg.webcamURL.absoluteString)")
-let jpeg = fetchJPEG(url: cfg.webcamURL)
+let jpeg = fetchFrameJPEG(url: cfg.webcamURL)
 log("debug", "raw \(jpeg.count) bytes")
 
 // Skip the rest of the pipeline if the bytes match the last cycle. install.sh

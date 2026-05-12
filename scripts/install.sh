@@ -5,6 +5,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Drop any leftover exports from the user's shell so config.sh defaults always win.
+# install.sh is meant to bake config.sh into the plist verbatim; one-off overrides
+# at install time should be done by editing config.sh, not via env.
+unset WEBCAM_URL INTERVAL_SEC CACHE_DIR LOG_DIR LOG_LEVEL \
+      RAW_CROP_TOP CANVAS_FIT CANVAS_ANCHOR BLUR_RADIUS \
+      COLOR_SATURATION COLOR_BRIGHTNESS
+
 source "$PROJECT_DIR/config.sh"
 
 LABEL="com.skybg.wallpaper"
@@ -49,4 +57,5 @@ launchctl bootstrap "$DOMAIN" "$PLIST_DST"
 launchctl enable "$DOMAIN/$LABEL"
 
 info "installed $LABEL (interval=${INTERVAL_SEC}s)"
+info "  fit=$CANVAS_FIT anchor=$CANVAS_ANCHOR blur=$BLUR_RADIUS sat=$COLOR_SATURATION bri=$COLOR_BRIGHTNESS crop_top=$RAW_CROP_TOP"
 info "logs: $LOG_DIR/{stdout,stderr}.log"

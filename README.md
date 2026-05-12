@@ -88,16 +88,25 @@ After editing `config.sh`, re-run `./scripts/install.sh` to re-render the plist 
 
 A companion `.saver` bundle (`SkyBg.saver`) shows the same per-monitor slice during screensaver mode, so the wallpaper region stays pixel-identical when macOS activates/deactivates the screensaver. You'll still see the standard system fade and chrome (dock, icons, windows) appearing/disappearing — those aren't suppressible — but the background image content is continuous.
 
+Requires a **Developer ID Application** certificate in your login keychain (free with Apple Developer enrollment; create via Xcode → Settings → Accounts → Manage Certificates → +). `build-saver.sh` auto-detects the first one. macOS Sequoia/Tahoe `amfid` rejects ad-hoc-signed `.saver` bundles, so this is non-optional.
+
 Build, install, and pick it once:
 
 ```bash
-./scripts/build-saver.sh                          # compiles + ad-hoc signs SkyBg.saver/
+./scripts/build-saver.sh                          # compiles + signs with your Developer ID
 ./scripts/install-saver.sh                         # copies into ~/Library/Screen Savers/
 open 'x-apple.systempreferences:com.apple.Lock-Screen-Settings.extension'
 # scroll to Screen Saver, pick "SkyBg"
 ```
 
-The screensaver discovers the cache by reading `~/Library/Application Support/com.skybg/cache_path`, which `bin/skybg` writes on every cycle. No hardcoded paths.
+Per-monitor slice discovery uses `NSWorkspace.shared.desktopImageURL(for:)` — the screensaver simply asks the system "what wallpaper is currently set on this screen?" and loads that file. No shared state files, no path discovery, sidesteps the screensaver-sandbox `~` redirect.
+
+After editing `screensaver.swift`, rebuild + reinstall + force the daemons to pick up the new bundle:
+
+```bash
+./scripts/build-saver.sh && ./scripts/install-saver.sh
+killall WallpaperAgent legacyScreenSaver Wallpaper WallpaperLegacyExtension 2>/dev/null
+```
 
 ## Notes
 

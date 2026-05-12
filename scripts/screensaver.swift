@@ -40,66 +40,29 @@ final class SkyBgScreenSaverView: ScreenSaverView {
         }
     }
 
-    private func cacheDir() -> String? {
-        let pointer = NSString(string: "~/Library/Application Support/com.skybg/cache_path").expandingTildeInPath
-        do {
-            let raw = try String(contentsOfFile: pointer, encoding: .utf8)
-            return raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        } catch {
-            lastError = "cacheDir read failed: \(error.localizedDescription)"
-            diag(lastError)
-            return nil
-        }
-    }
-
-    private func currentDisplayID() -> UInt32? {
-        if let id = window?.screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32 {
-            return id
-        }
-        return NSScreen.main?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32
-    }
-
-    private func newestWallpaper(in dir: String, for displayID: UInt32?) -> (path: String, mtime: TimeInterval)? {
-        let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(atPath: dir) else {
-            lastError = "list \(dir) failed"
-            diag(lastError)
-            return nil
-        }
-        let prefix: String? = displayID.map { "wallpaper-\($0)-" }
-        var best: (String, TimeInterval)?
-        for name in entries {
-            guard name.hasPrefix("wallpaper-") && name.hasSuffix(".jpg") else { continue }
-            if let p = prefix, !name.hasPrefix(p) { continue }
-            let path = (dir as NSString).appendingPathComponent(name)
-            let mtime = ((try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date)?
-                .timeIntervalSinceReferenceDate ?? 0
-            if best == nil || mtime > best!.1 { best = (path, mtime) }
-        }
-        if best == nil {
-            lastError = "no wallpaper in \(dir) for id=\(displayID.map(String.init) ?? "any")"
-            diag(lastError)
-        }
-        return best.map { (path: $0.0, mtime: $0.1) }
-    }
-
+    // Ask the system for whatever wallpaper sky-bg most recently set on this screen,
+    // and load that file. No shared-state files, no glob discovery — sidesteps the
+    // screensaver-sandbox HOME redirect that breaks ~/Library/Application Support reads.
     private func reloadIfNeeded() -> Bool {
-        guard let dir = cacheDir() else { image = nil; return true }
-        let id = currentDisplayID()
-        var pick = newestWallpaper(in: dir, for: id)
-        if pick == nil { pick = newestWallpaper(in: dir, for: nil) }
-        guard let pick else { image = nil; return true }
-
-        if pick.path != imagePath || pick.mtime != imageMtime {
-            imagePath = pick.path
-            imageMtime = pick.mtime
-            image = NSImage(contentsOfFile: pick.path)
+        guard let screen = window?.screen ?? NSScreen.main,
+              let url = NSWorkspace.shared.desktopImageURL(for: screen) else {
+            lastError = "no desktopImageURL for screen"
+            diag(lastError)
+            if image != nil { image = nil; return true }
+            return false
+        }
+        let mtime = ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date)?
+            .timeIntervalSinceReferenceDate ?? 0
+        if url.path != imagePath || mtime != imageMtime {
+            imagePath = url.path
+            imageMtime = mtime
+            image = NSImage(contentsOf: url)
             if image == nil {
-                lastError = "NSImage failed to load \(pick.path)"
+                lastError = "NSImage(contentsOf:) failed for \(url.path)"
                 diag(lastError)
             } else {
                 lastError = ""
-                diag("loaded \(pick.path) (id=\(id.map(String.init) ?? "?"))")
+                diag("loaded \(url.path)")
             }
             return true
         }
