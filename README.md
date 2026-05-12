@@ -101,7 +101,7 @@ CANVAS_ANCHOR=1 ./test/run-once.sh      # any env var overrides the config defau
 ./scripts/gen-preview.sh                # refresh docs/preview.gif from the live MP4
 ```
 
-`gen-preview.sh` is a separate dev tool — it sources `config.sh` so the rendered canvas (fit/anchor/blur/color) matches the live wallpaper, but it doesn't touch `bin/skybg`, the cache, or the launchd agent. It defaults to `wbbs_cam_day.mp4` (the 24h time-lapse, ~58 MB) regardless of `config.sh`'s `WEBCAM_URL`, then samples the middle `GIF_SPAN_FRAC` (default 0.5 → ~12h centered on the timeline midpoint) so a single loop captures the daylight arc without the dark-of-night extremes. Tunables (env-overridable):
+`gen-preview.sh` is a separate dev tool — it sources `config.sh` so the rendered canvas (fit/anchor/blur/color) matches the live wallpaper, but it doesn't touch `bin/skybg`, the cache, or the launchd agent. It defaults to `wbbs_cam_day.mp4` (the 24h time-lapse, ~58 MB) regardless of `config.sh`'s `WEBCAM_URL`, then samples a `GIF_SPAN_FRAC` window (default 0.5 → ~12h) centered at `GIF_SPAN_CENTER` of the timeline (default 0.7 → afternoon→sunset arc) so a single loop captures the most visually dynamic stretch without the dark-of-night extremes. Tunables (env-overridable):
 
 | Var                | Default | Notes                                                    |
 |--------------------|---------|----------------------------------------------------------|
