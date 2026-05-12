@@ -1,5 +1,9 @@
 # sky-bg
 
+<p align="center">
+  <img src="docs/preview.gif" alt="Animated stitched preview: WBB rooftop time-lapse fit across the three-monitor virtual canvas, blurred and color-graded, sliced per display with bezel gaps." width="900">
+</p>
+
 Pulls a webcam frame on an interval (JPEG endpoint or the last frame of an MP4/MOV), fits it onto the virtual desktop arrangement, slices out each monitor's region, and sets it as the macOS wallpaper across a multi-monitor setup. Runs as a `launchd` user agent.
 
 Imagery courtesy of the [Horel Research Group](https://horel.chpc.utah.edu/) (MesoWest / University of Utah Department of Atmospheric Sciences, CHPC) — the WBB rooftop camera atop the William Browning Building, looking south over the Salt Lake Valley toward the Wasatch and Oquirrh ranges. Current frame: <https://horel.chpc.utah.edu/data/station_cameras/wbbs_cam/wbbs_cam_current.jpg>.
@@ -43,12 +47,15 @@ sky-bg/
 │   ├── build-saver.sh         # build SkyBg.saver bundle (Developer ID signed)
 │   ├── install.sh             # build + render plist + launchctl bootstrap (--unload to remove)
 │   ├── install-saver.sh       # copy SkyBg.saver into ~/Library/Screen Savers/
-│   └── detect.sh              # debug: dump the current NSScreen arrangement
+│   ├── detect.sh              # debug: dump the current NSScreen arrangement
+│   ├── gen-preview.sh         # render docs/preview.gif (sources config.sh)
+│   └── gen-preview.swift      # standalone Swift, animated multi-monitor stitch
 ├── test/
 │   └── run-once.sh            # rebuild + run once (--watch, --no-set)
+├── docs/preview.gif           # README artifact rendered by gen-preview.sh
 ├── bin/skybg                  # built locally, gitignored
 ├── SkyBg.saver/               # built locally, gitignored
-├── .cache/                    # raw.jpg + wallpaper-<id>-{A|B}.heic + last-hash (gitignored)
+├── .cache/                    # raw.jpg + wallpaper-<id>-{A|B}.heic + last-hash
 └── .logs/                     # launchd stdout/stderr (gitignored)
 ```
 
@@ -91,7 +98,10 @@ chmod +x scripts/*.sh test/*.sh
 LOG_LEVEL=debug ./test/run-once.sh      # verbose
 CANVAS_ANCHOR=top ./test/run-once.sh    # any env var overrides the config default
 ./scripts/detect.sh                     # dump current display arrangement
+./scripts/gen-preview.sh                # refresh docs/preview.gif from the live MP4
 ```
+
+`gen-preview.sh` is a separate dev tool — it sources `config.sh` so the rendered preview matches the live wallpaper config, but it doesn't touch `bin/skybg`, the cache, or the launchd agent. Knobs (`GIF_FRAMES`, `GIF_DELAY_MS`, `GIF_TARGET_WIDTH`, `GIF_BEZEL_PX`, `GIF_OUT`) are env-overridable, defaults are tuned for the README artifact.
 
 ## Install
 
