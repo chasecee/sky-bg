@@ -123,26 +123,34 @@ func fetchFrameJPEG(url: URL, timeout: TimeInterval = 30) -> Data {
     }
 }
 
+// Shell out to /usr/bin/curl. CFNetwork inside launchd-spawned processes hits
+// the Local Network privacy resolver (nehelper UUID lookup) on every RFC1918
+// destination and races against process startup, returning -1009 before the
+// grant lands. /usr/bin/curl is a system binary with its own attribution and
+// bypasses that path entirely.
 func fetchJPEG(url: URL, timeout: TimeInterval) -> Data {
-    var req = URLRequest(url: url)
-    req.timeoutInterval = timeout
-    req.cachePolicy = .reloadIgnoringLocalCacheData
-    let sem = DispatchSemaphore(value: 0)
-    var result: Data?
-    var err: String?
-    URLSession.shared.dataTask(with: req) { data, response, error in
-        defer { sem.signal() }
-        if let error = error { err = error.localizedDescription; return }
-        guard let http = response as? HTTPURLResponse else { err = "no HTTP response"; return }
-        guard (200..<300).contains(http.statusCode) else { err = "HTTP \(http.statusCode)"; return }
-        guard let d = data, d.count > 3, d[0] == 0xFF, d[1] == 0xD8, d[2] == 0xFF else {
-            err = "response is not a JPEG"; return
-        }
-        result = d
-    }.resume()
-    sem.wait()
-    if let e = err { die("fetch failed: \(e)") }
-    return result!
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+    p.arguments = [
+        "--silent", "--show-error", "--fail",
+        "--max-time", "\(Int(timeout))",
+        url.absoluteString,
+    ]
+    let out = Pipe(), errp = Pipe()
+    p.standardOutput = out
+    p.standardError = errp
+    do { try p.run() } catch { die("curl spawn failed: \(error)") }
+    let data = out.fileHandleForReading.readDataToEndOfFile()
+    let errData = errp.fileHandleForReading.readDataToEndOfFile()
+    p.waitUntilExit()
+    guard p.terminationStatus == 0 else {
+        let msg = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        die("fetch failed: curl exit \(p.terminationStatus)\(msg.isEmpty ? "" : ": \(msg)")")
+    }
+    guard data.count > 3, data[0] == 0xFF, data[1] == 0xD8, data[2] == 0xFF else {
+        die("response is not a JPEG")
+    }
+    return data
 }
 
 // Decode the last frame of a remote MP4/MOV via AVFoundation. AVURLAsset uses
