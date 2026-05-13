@@ -24,7 +24,7 @@ LOG_DIR="${LOG_DIR:-$PROJECT_DIR/.logs}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
 
 # Pixels to crop off the top of the raw frame (removes any OSD banner).
-RAW_CROP_TOP="${RAW_CROP_TOP:-40}"
+RAW_CROP_TOP="${RAW_CROP_TOP:-38}"
 # Tuned to the 1280x960 WBBS mp4 source; was 8 for the legacy 500x375 jpg.
 # RAW_CROP_TOP="${RAW_CROP_TOP:-22}"
 
@@ -33,16 +33,16 @@ CANVAS_FIT="${CANVAS_FIT:-cover}"
 
 # Vertical anchor of the source within the canvas: 0 = bottom, 0.5 = center, 1 = top.
 # Horizontal is always centered.
-CANVAS_ANCHOR="${CANVAS_ANCHOR:-1}"
+CANVAS_ANCHOR="${CANVAS_ANCHOR:-0.5}"
 # Tuned for the WBBS sky framing across the tri-monitor canvas.
 # CANVAS_ANCHOR="${CANVAS_ANCHOR:-0.333}"
 
 # Blur radius applied before slicing. Single value = uniform.
 # Comma list = progressive top->bottom, evenly distributed (e.g. "10,50" or "10,30,50"). 0 = sharp.
-BLUR_RADIUS="${BLUR_RADIUS:-20,0,20}"
+BLUR_RADIUS="${BLUR_RADIUS:-30,20,60}"
 
 # CIColorControls. Saturation: multiplier (1.0 unchanged). Brightness: additive offset (0.0 unchanged).
 COLOR_SATURATION="${COLOR_SATURATION:-1.0}"
-COLOR_BRIGHTNESS="${COLOR_BRIGHTNESS:--0.0}"
+COLOR_BRIGHTNESS="${COLOR_BRIGHTNESS:--0.02}"
 
 mkdir -p "$CACHE_DIR" "$LOG_DIR"
