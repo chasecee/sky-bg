@@ -15,7 +15,7 @@ source "$HERE/config.sh"
 # the README artifact wants maximum temporal range.
 WEBCAM_URL="${_USER_WEBCAM_URL:-https://horel.chpc.utah.edu/data/station_cameras/wbbs_cam/wbbs_cam_day.mp4}"
 
-export WEBCAM_URL CACHE_DIR LOG_DIR LOG_LEVEL \
+export WEBCAM_URL OUTPUT_DIR LOG_DIR LOG_LEVEL \
        RAW_CROP_TOP CANVAS_FIT CANVAS_ANCHOR BLUR_RADIUS \
        COLOR_SATURATION COLOR_BRIGHTNESS
 

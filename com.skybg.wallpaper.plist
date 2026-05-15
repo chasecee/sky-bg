@@ -12,8 +12,10 @@
   <dict>
     <key>WEBCAM_URL</key>
     <string>__WEBCAM_URL__</string>
-    <key>CACHE_DIR</key>
-    <string>__CACHE_DIR__</string>
+    <key>OUTPUT_DIR</key>
+    <string>__OUTPUT_DIR__</string>
+    <key>HISTORY_DIR</key>
+    <string>__HISTORY_DIR__</string>
     <key>LOG_DIR</key>
     <string>__LOG_DIR__</string>
     <key>LOG_LEVEL</key>
@@ -37,8 +39,6 @@
   <integer>__INTERVAL__</integer>
   <key>RunAtLoad</key>
   <true/>
-  <key>StandardOutPath</key>
-  <string>__LOG_DIR__/stdout.log</string>
   <key>StandardErrorPath</key>
   <string>__LOG_DIR__/stderr.log</string>
 </dict>

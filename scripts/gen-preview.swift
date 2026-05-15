@@ -33,6 +33,18 @@ func die(_ s: String) -> Never {
     exit(1)
 }
 
+func redactURL(_ url: URL) -> String {
+    guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+        return url.absoluteString
+    }
+    components.queryItems = components.queryItems?.map { item in
+        item.name.lowercased() == "token"
+            ? URLQueryItem(name: item.name, value: "REDACTED")
+            : item
+    }
+    return components.string ?? url.absoluteString
+}
+
 let urlStr = env("WEBCAM_URL")
     ?? "https://horel.chpc.utah.edu/data/station_cameras/wbbs_cam/wbbs_cam_hour.mp4"
 guard let url = URL(string: urlStr) else { die("invalid WEBCAM_URL: \(urlStr)") }
@@ -91,7 +103,7 @@ note("canvas \(Int(canvasW))x\(Int(canvasH))pt -> output \(targetW)x\(outH)px (s
 let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory())
     .appendingPathComponent("skybg-preview-\(UUID().uuidString).mp4")
 do {
-    note("download \(url.absoluteString)")
+    note("download \(redactURL(url))")
     let data = try Data(contentsOf: url)
     try data.write(to: tmpURL)
     note("downloaded \(data.count) bytes -> \(tmpURL.path)")

@@ -23,8 +23,18 @@ mkdir -p "$SAVER/Contents/Resources"
 
 # Static thumbnail for the System Settings picker — macOS Sequoia/Tahoe pull
 # this image rather than calling our draw(_:) for the small preview tile.
-# Use the most-recent main-monitor wallpaper if one exists; otherwise skip.
-THUMB_SRC=$(/bin/ls -t "$HERE/.cache/wallpaper-3-"*.heic "$HERE/.cache/wallpaper-3-"*.jpg 2>/dev/null | /usr/bin/head -1 || true)
+# Use the largest current wallpaper slice if one exists; otherwise skip.
+THUMB_SRC=""
+THUMB_SIZE=-1
+shopt -s nullglob
+for candidate in "$HERE"/output/wallpaper-*.heic "$HERE"/output/wallpaper-*.jpg; do
+  size=$(/usr/bin/stat -f %z "$candidate" 2>/dev/null || echo 0)
+  if (( size > THUMB_SIZE )); then
+    THUMB_SIZE=$size
+    THUMB_SRC="$candidate"
+  fi
+done
+shopt -u nullglob
 if [[ -n "${THUMB_SRC:-}" && -f "$THUMB_SRC" ]]; then
   /usr/bin/sips -z 240 480 "$THUMB_SRC" --out "$SAVER/Contents/Resources/thumbnail.png" >/dev/null 2>&1 || true
 fi

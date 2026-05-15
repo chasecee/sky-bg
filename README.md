@@ -25,14 +25,15 @@ Bash is only used for install / dev tooling: `scripts/build.sh`, `scripts/instal
 ## Model
 
 1. Fetch the source. JPEG endpoints are pulled directly; MP4/MOV endpoints go through AVFoundation, which uses HTTP range requests to grab only the moov atom + trailing samples and decode the last frame.
-2. SHA-256 the raw bytes; if it matches last cycle's hash, exit early. (`install.sh` deletes `.cache/last-hash` so any config edit forces a re-process.)
-3. Trim the top `RAW_CROP_TOP` rows (the webcam's burned-in timestamp banner).
-4. Auto-detect every monitor via `NSScreen` (origin in points, pixel size, screen handle).
-5. Compute the bounding rect of all monitor frames — that's the virtual canvas.
-6. Scale the source onto the canvas per `CANVAS_FIT` (`cover` fills + crops overflow, `contain` letterboxes), pinned per `CANVAS_ANCHOR`.
-7. Apply `CIColorControls` (saturation/brightness) and optional blur. `BLUR_RADIUS` accepts a single number (uniform `CIGaussianBlur`) or a comma-separated stop list (`CIMaskedVariableBlur` driven by a vertical gradient mask, e.g. `5,20` = light at top, heavy at bottom).
-8. For each monitor, slice the canvas at that monitor's point-rect, resample to its native pixel resolution, and write to `wallpaper-<id>-{A|B}.heic` (alternating slot — fresh path each cycle so the WindowServer refreshes, but bounded "Recent Wallpapers" entries).
-9. Apply each slice via `NSWorkspace.setDesktopImageURL` against that monitor's `NSScreen`, dispatched concurrently across displays.
+2. SHA-256 the raw bytes; if it matches last cycle's hash, exit early. (`install.sh` deletes `output/last-hash` so any config edit forces a re-process.)
+3. Archive the source frame into `HISTORY_DIR` as `frame-<timestamp>-<sha>.jpg` and append metadata to `HISTORY_DIR/index.csv` (`timestamp_utc,unix_ms,sha256,file`).
+4. Trim the top `RAW_CROP_TOP` rows (the webcam's burned-in timestamp banner).
+5. Auto-detect every monitor via `NSScreen` (origin in points, pixel size, screen handle).
+6. Compute the bounding rect of all monitor frames — that's the virtual canvas.
+7. Scale the source onto the canvas per `CANVAS_FIT` (`cover` fills + crops overflow, `contain` letterboxes), pinned per `CANVAS_ANCHOR`.
+8. Apply `CIColorControls` (saturation/brightness) and optional blur. `BLUR_RADIUS` accepts a single number (uniform `CIGaussianBlur`) or a comma-separated stop list (`CIMaskedVariableBlur` driven by a vertical gradient mask, e.g. `5,20` = light at top, heavy at bottom).
+9. For each monitor, slice the canvas at that monitor's point-rect, resample to its native pixel resolution, and write to `wallpaper-<id>-{A|B}.heic` (alternating slot — fresh path each cycle so the WindowServer refreshes, but bounded "Recent Wallpapers" entries).
+10. Apply each slice via `NSWorkspace.setDesktopImageURL` against that monitor's `NSScreen`, dispatched concurrently across displays.
 
 ## Layout
 
@@ -55,37 +56,44 @@ sky-bg/
 ├── docs/preview.gif           # README artifact rendered by gen-preview.sh
 ├── bin/skybg                  # built locally, gitignored
 ├── SkyBg.saver/               # built locally, gitignored
-├── .cache/                    # raw.jpg + wallpaper-<id>-{A|B}.heic + last-hash
-└── .logs/                     # launchd stdout/stderr (gitignored)
+├── output/                    # raw.jpg + wallpaper-<id>-{A|B}.heic + last-hash + history/ (tracked)
+└── .logs/                     # launchd stderr log (gitignored)
 ```
 
 ## Configuration
 
 All knobs live in `config.sh` (overridable via env). The binary reads them from its environment at runtime; `install.sh` bakes them into the plist's `EnvironmentVariables` so `launchctl` injects them on every cycle.
 
-| Var                | Default              | Notes                                                       |
-|--------------------|----------------------|-------------------------------------------------------------|
-| `WEBCAM_URL`       | `wbbs_cam_hour.mp4`  | JPEG, MP4, or MOV. Video → last-frame via AVFoundation       |
-| `INTERVAL_SEC`     | 60                   | launchd `StartInterval`                                     |
-| `RAW_CROP_TOP`     | 22                   | trims the timestamp banner; tuned to the 1280×960 mp4       |
-| `CANVAS_FIT`       | cover                | `cover` fills (crops overflow) / `contain` letterboxes      |
-| `CANVAS_ANCHOR`    | 0.25                 | vertical anchor 0..1 (0=bottom, 0.5=center, 1=top); horiz always centered |
-| `BLUR_RADIUS`      | `5,20`               | scalar = uniform; comma list = top→bottom gradient stops    |
-| `COLOR_SATURATION` | 1.05                 | CIColorControls multiplier; 1.0 = unchanged                 |
-| `COLOR_BRIGHTNESS` | -0.04                | CIColorControls additive offset; 0.0 = unchanged            |
-| `LOG_LEVEL`        | info                 | `debug | info | warn | error`                               |
-| `LOG_MAX_BYTES`    | 5_242_880            | rotate `.logs/{stdout,stderr}.log` past this size           |
+| Var                | Default                                                         | Notes                                                             |
+|--------------------|-----------------------------------------------------------------|-------------------------------------------------------------------|
+| `WEBCAM_URL`       | `http://<thingino-ip>/x/ch0.jpg?token=$WEBCAM_TOKEN`            | JPEG, MP4, or MOV. Video sources decode last frame via AVFoundation |
+| `INTERVAL_SEC`     | 120                                                             | launchd `StartInterval`                                           |
+| `OUTPUT_DIR`       | `./output`                                                      | stores `raw.jpg`, `last-hash`, and per-display `wallpaper-*` files |
+| `HISTORY_DIR`      | `./output/history`                                              | append-only archive of source frames + `index.csv`                |
+| `RAW_CROP_TOP`     | 38                                                              | trims camera OSD/banner rows                                      |
+| `CANVAS_FIT`       | cover                                                           | `cover` fills (crops overflow) / `contain` letterboxes            |
+| `CANVAS_ANCHOR`    | 0.5                                                             | vertical anchor 0..1 (0=bottom, 0.5=center, 1=top)               |
+| `BLUR_RADIUS`      | `40,30,40`                                                      | scalar = uniform; comma list = top→bottom gradient stops          |
+| `COLOR_SATURATION` | 1.0                                                             | CIColorControls multiplier; 1.0 = unchanged                       |
+| `COLOR_BRIGHTNESS` | -0.05                                                           | CIColorControls additive offset; 0.0 = unchanged                  |
+| `LOG_LEVEL`        | info                                                            | `debug | info | warn | error`                                     |
+
+## Webcam source
+
+Default setup is a local Thingino camera snapshot URL and expects `WEBCAM_TOKEN` in `.env` (gitignored). If you want a public no-token source instead, switch `WEBCAM_URL` to WBBS:
+
+```bash
+WEBCAM_URL="https://horel.chpc.utah.edu/data/station_cameras/wbbs_cam/wbbs_cam_hour.mp4"
+```
 
 ## Source endpoint trade-offs
 
-|                        | `wbbs_cam_current.jpg` | `wbbs_cam_hour.mp4` (default) | `wbbs_cam_day.mp4` |
-|------------------------|------------------------|-------------------------------|--------------------|
-| Resolution             | 500×375                | 1280×960                      | 1280×960           |
-| Latency vs real time   | ~1 min                 | ~12–15 min                    | ~12–15 min         |
-| Bytes pulled per cycle | ~22 KB                 | ~few hundred KB (range reads) | same; bigger file  |
-| File size on server    | ~22 KB                 | ~16 MB                        | ~58 MB             |
+| Source                     | Resolution          | Latency vs real time | Access model           |
+|----------------------------|---------------------|----------------------|------------------------|
+| Thingino `.../x/ch0.jpg`   | 1920×1080 (main)    | ~1s                  | LAN + token            |
+| WBBS `wbbs_cam_hour.mp4`   | 1280×960            | ~12–15 min           | public, no token       |
 
-Flipping `WEBCAM_URL` is enough — `fetchFrameJPEG` dispatches on extension. Bump `RAW_CROP_TOP` to 8 for the legacy jpg, leave at 22 for either mp4. Sky doesn't move fast, so the freshness hit is usually fine.
+Flipping `WEBCAM_URL` is enough. `fetchFrameJPEG` dispatches by extension and uses AVFoundation only for video URLs.
 
 ## Dev workflow
 
@@ -101,7 +109,7 @@ CANVAS_ANCHOR=1 ./test/run-once.sh      # any env var overrides the config defau
 ./scripts/gen-preview.sh                # refresh docs/preview.gif from the live MP4
 ```
 
-`gen-preview.sh` is a separate dev tool — it sources `config.sh` so the rendered canvas (fit/anchor/blur/color) matches the live wallpaper, but it doesn't touch `bin/skybg`, the cache, or the launchd agent. It defaults to `wbbs_cam_day.mp4` (the 24h time-lapse, ~58 MB) regardless of `config.sh`'s `WEBCAM_URL`, then samples a `GIF_SPAN_FRAC` window (default 0.5 → ~12h) centered at `GIF_SPAN_CENTER` of the timeline (default 0.7 → afternoon→sunset arc) so a single loop captures the most visually dynamic stretch without the dark-of-night extremes. Tunables (env-overridable):
+`gen-preview.sh` is a separate dev tool — it sources `config.sh` so the rendered canvas (fit/anchor/blur/color) matches the live wallpaper, but it doesn't touch `bin/skybg`, `output/`, or the launchd agent. It defaults to `wbbs_cam_day.mp4` (the 24h time-lapse, ~58 MB) regardless of `config.sh`'s `WEBCAM_URL`, then samples a `GIF_SPAN_FRAC` window (default 0.5 → ~12h) centered at `GIF_SPAN_CENTER` of the timeline (default 0.7 → afternoon→sunset arc) so a single loop captures the most visually dynamic stretch without the dark-of-night extremes. Tunables (env-overridable):
 
 | Var                | Default | Notes                                                    |
 |--------------------|---------|----------------------------------------------------------|
@@ -121,7 +129,7 @@ CANVAS_ANCHOR=1 ./test/run-once.sh      # any env var overrides the config defau
 ./scripts/install.sh --unload  # bootout and remove
 ```
 
-The agent runs at load and every `INTERVAL_SEC`. Logs land in `.logs/stdout.log` and `.logs/stderr.log`.
+The agent runs at load and every `INTERVAL_SEC`. Logs land in `.logs/stderr.log`.
 
 After editing `config.sh`, re-run `./scripts/install.sh` to re-render the plist and reload. (It also `unset`s any inherited env vars first so leftover shell exports don't leak into the agent.)
 

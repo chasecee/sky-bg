@@ -26,18 +26,9 @@ final class SkyBgScreenSaverView: ScreenSaverView {
         diag("init(coder)")
     }
 
-    // Logs go to Console (subsystem com.skybg.screensaver) and to /tmp/skybg-saver.log
-    // when /tmp is writable from the screensaver host's sandbox.
+    // Logs go to Console (subsystem com.skybg.screensaver).
     private func diag(_ msg: String) {
         NSLog("SkyBg: %@", msg)
-        let line = "\(Date()) \(msg)\n"
-        guard let data = line.data(using: .utf8) else { return }
-        let url = URL(fileURLWithPath: "/tmp/skybg-saver.log")
-        if let h = try? FileHandle(forWritingTo: url) {
-            h.seekToEndOfFile(); h.write(data); try? h.close()
-        } else {
-            try? data.write(to: url)
-        }
     }
 
     // Ask the system for whatever wallpaper sky-bg most recently set on this screen,

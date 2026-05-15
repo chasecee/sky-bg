@@ -4,7 +4,8 @@
 // Knobs (all from environment, set by launchd or test/run-once.sh):
 //   WEBCAM_URL      : source URL — JPEG or MP4/MOV (required)
 //                     For video, the last frame is decoded via AVFoundation.
-//   CACHE_DIR       : where to write raw + processed images (required)
+//   OUTPUT_DIR      : where to write raw + processed images (required)
+//   HISTORY_DIR     : where to archive timestamped source frames (default OUTPUT_DIR/history)
 //   LOG_LEVEL       : debug | info | warn | error            (default info)
 //   RAW_CROP_TOP    : pixels trimmed off the top of the source (default 0)
 //   CANVAS_FIT      : cover | contain                          (default cover)
@@ -44,7 +45,7 @@ func rotateLogs() {
     guard let logDir = ProcessInfo.processInfo.environment["LOG_DIR"] else { return }
     let maxBytes = Int64(ProcessInfo.processInfo.environment["LOG_MAX_BYTES"] ?? "") ?? 5_242_880
     let fm = FileManager.default
-    for name in ["stderr.log", "stdout.log"] {
+    for name in ["stderr.log"] {
         let path = (logDir as NSString).appendingPathComponent(name)
         let size = ((try? fm.attributesOfItem(atPath: path))?[.size] as? Int64) ?? 0
         if size > maxBytes {
@@ -57,7 +58,8 @@ func rotateLogs() {
 
 struct Config {
     let webcamURL: URL
-    let cacheDir: URL
+    let outputDir: URL
+    let historyDir: URL
     let cropTop: CGFloat
     let fit: String
     let anchor: Double
@@ -71,15 +73,23 @@ struct Config {
         guard let urlStr = env["WEBCAM_URL"], let url = URL(string: urlStr) else {
             die("WEBCAM_URL must be set to a valid URL")
         }
-        guard let cacheStr = env["CACHE_DIR"] else { die("CACHE_DIR must be set") }
-        let cacheURL = URL(fileURLWithPath: cacheStr)
-        try? FileManager.default.createDirectory(at: cacheURL, withIntermediateDirectories: true)
+        guard let outputStr = env["OUTPUT_DIR"] else { die("OUTPUT_DIR must be set") }
+        let outputURL = URL(fileURLWithPath: outputStr)
+        try? FileManager.default.createDirectory(at: outputURL, withIntermediateDirectories: true)
+        let historyURL: URL
+        if let historyStr = env["HISTORY_DIR"], !historyStr.isEmpty {
+            historyURL = URL(fileURLWithPath: historyStr)
+        } else {
+            historyURL = outputURL.appendingPathComponent("history")
+        }
+        try? FileManager.default.createDirectory(at: historyURL, withIntermediateDirectories: true)
         let stops = (env["BLUR_RADIUS"] ?? "0")
             .split(separator: ",")
             .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
         return Config(
             webcamURL: url,
-            cacheDir: cacheURL,
+            outputDir: outputURL,
+            historyDir: historyURL,
             cropTop: CGFloat(Int(env["RAW_CROP_TOP"] ?? "0") ?? 0),
             fit: (env["CANVAS_FIT"] ?? "cover").lowercased(),
             anchor: min(1, max(0, Double(env["CANVAS_ANCHOR"] ?? "0.5") ?? 0.5)),
@@ -121,6 +131,18 @@ func fetchFrameJPEG(url: URL, timeout: TimeInterval = 30) -> Data {
     default:
         return fetchJPEG(url: url, timeout: timeout)
     }
+}
+
+func redactURL(_ url: URL) -> String {
+    guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+        return url.absoluteString
+    }
+    components.queryItems = components.queryItems?.map { item in
+        item.name.lowercased() == "token"
+            ? URLQueryItem(name: item.name, value: "REDACTED")
+            : item
+    }
+    return components.string ?? url.absoluteString
 }
 
 // Shell out to /usr/bin/curl. CFNetwork inside launchd-spawned processes hits
@@ -233,6 +255,46 @@ func cleanupOldCycles(in dir: URL, keep: Set<URL>) {
     }
 }
 
+let historyStampFmt: DateFormatter = {
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.timeZone = TimeZone(secondsFromGMT: 0)
+    f.dateFormat = "yyyyMMdd-HHmmss-SSS"
+    return f
+}()
+
+func archiveSourceFrame(_ data: Data, hashHex: String, cfg: Config) {
+    let now = Date()
+    let stamp = historyStampFmt.string(from: now)
+    let fileName = "frame-\(stamp)-\(hashHex.prefix(12)).jpg"
+    let frameURL = cfg.historyDir.appendingPathComponent(fileName)
+    do {
+        try data.write(to: frameURL, options: .atomic)
+    } catch {
+        log("warn", "history write failed: \(error)")
+        return
+    }
+    let indexURL = cfg.historyDir.appendingPathComponent("index.csv")
+    let unixMs = Int64(now.timeIntervalSince1970 * 1000)
+    let row = "\(stamp),\(unixMs),\(hashHex),\(fileName)\n"
+    let fm = FileManager.default
+    if !fm.fileExists(atPath: indexURL.path) {
+        let header = "timestamp_utc,unix_ms,sha256,file\n"
+        try? header.write(to: indexURL, atomically: true, encoding: .utf8)
+    }
+    guard let handle = try? FileHandle(forWritingTo: indexURL) else {
+        log("warn", "history index open failed")
+        return
+    }
+    do {
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(row.utf8))
+        try handle.close()
+    } catch {
+        log("warn", "history index append failed: \(error)")
+    }
+}
+
 func processCanvas(src: CIImage, monitors: [Monitor], cfg: Config) -> [(Monitor, URL)] {
     let srcExt = src.extent
     guard srcExt.height > cfg.cropTop else { die("RAW_CROP_TOP \(cfg.cropTop) >= source height \(srcExt.height)") }
@@ -328,7 +390,7 @@ func processCanvas(src: CIImage, monitors: [Monitor], cfg: Config) -> [(Monitor,
         // "Recent Wallpapers" list stays capped at 2 entries per display.
         let currentName = NSWorkspace.shared.desktopImageURL(for: m.screen)?.lastPathComponent ?? ""
         let nextSlot = currentName.hasSuffix("-A.heic") ? "B" : "A"
-        let outURL = cfg.cacheDir.appendingPathComponent("wallpaper-\(m.id)-\(nextSlot).heic")
+        let outURL = cfg.outputDir.appendingPathComponent("wallpaper-\(m.id)-\(nextSlot).heic")
         // HEIF 10-bit + Display P3 — 1024 values per channel kills the banding
         // 8-bit JPEG produces in smooth sky gradients.
         do {
@@ -350,22 +412,23 @@ rotateLogs()
 
 let cfg = Config.fromEnv()
 
-log("info", "fetch \(cfg.webcamURL.absoluteString)")
+log("info", "fetch \(redactURL(cfg.webcamURL))")
 let jpeg = fetchFrameJPEG(url: cfg.webcamURL)
 log("debug", "raw \(jpeg.count) bytes")
 
 // Skip the rest of the pipeline if the bytes match the last cycle. install.sh
 // deletes last-hash so any config edit forces a re-process on the next cycle.
 let hashHex = SHA256.hash(data: jpeg).compactMap { String(format: "%02x", $0) }.joined()
-let hashFile = cfg.cacheDir.appendingPathComponent("last-hash")
+let hashFile = cfg.outputDir.appendingPathComponent("last-hash")
 if let prev = try? String(contentsOf: hashFile, encoding: .utf8),
    prev.trimmingCharacters(in: .whitespacesAndNewlines) == hashHex {
     log("info", "source unchanged (sha=\(hashHex.prefix(12))), skipping")
     exit(0)
 }
 try? hashHex.write(to: hashFile, atomically: true, encoding: .utf8)
+archiveSourceFrame(jpeg, hashHex: hashHex, cfg: cfg)
 
-let rawURL = cfg.cacheDir.appendingPathComponent("raw.jpg")
+let rawURL = cfg.outputDir.appendingPathComponent("raw.jpg")
 do { try jpeg.write(to: rawURL) } catch { die("could not write raw.jpg: \(error)") }
 guard let src = CIImage(contentsOf: rawURL) else { die("could not parse raw image") }
 
@@ -393,7 +456,7 @@ if cfg.noApply {
         }
     }
     if let err = firstErr { die(err) }
-    cleanupOldCycles(in: cfg.cacheDir, keep: Set(outputs.map { $0.1 }))
+    cleanupOldCycles(in: cfg.outputDir, keep: Set(outputs.map { $0.1 }))
 }
 
 log("info", "done")

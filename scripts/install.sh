@@ -9,7 +9,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Drop any leftover exports from the user's shell so config.sh defaults always win.
 # install.sh is meant to bake config.sh into the plist verbatim; one-off overrides
 # at install time should be done by editing config.sh, not via env.
-unset WEBCAM_URL INTERVAL_SEC CACHE_DIR LOG_DIR LOG_LEVEL \
+unset WEBCAM_URL INTERVAL_SEC OUTPUT_DIR HISTORY_DIR LOG_DIR LOG_LEVEL \
       RAW_CROP_TOP CANVAS_FIT CANVAS_ANCHOR BLUR_RADIUS \
       COLOR_SATURATION COLOR_BRIGHTNESS
 
@@ -39,7 +39,8 @@ sed \
   -e "s|__PROJECT_DIR__|$PROJECT_DIR|g" \
   -e "s|__INTERVAL__|$INTERVAL_SEC|g" \
   -e "s|__LOG_DIR__|$LOG_DIR|g" \
-  -e "s|__CACHE_DIR__|$CACHE_DIR|g" \
+  -e "s|__OUTPUT_DIR__|$OUTPUT_DIR|g" \
+  -e "s|__HISTORY_DIR__|$HISTORY_DIR|g" \
   -e "s|__WEBCAM_URL__|$WEBCAM_URL|g" \
   -e "s|__LOG_LEVEL__|$LOG_LEVEL|g" \
   -e "s|__RAW_CROP_TOP__|$RAW_CROP_TOP|g" \
@@ -50,7 +51,7 @@ sed \
   -e "s|__COLOR_BRIGHTNESS__|$COLOR_BRIGHTNESS|g" \
   "$PLIST_SRC" > "$PLIST_DST"
 
-rm -f "$CACHE_DIR/last-hash"
+rm -f "$OUTPUT_DIR/last-hash"
 
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
 launchctl bootstrap "$DOMAIN" "$PLIST_DST"
@@ -58,4 +59,4 @@ launchctl enable "$DOMAIN/$LABEL"
 
 info "installed $LABEL (interval=${INTERVAL_SEC}s)"
 info "  fit=$CANVAS_FIT anchor=$CANVAS_ANCHOR blur=$BLUR_RADIUS sat=$COLOR_SATURATION bri=$COLOR_BRIGHTNESS crop_top=$RAW_CROP_TOP"
-info "logs: $LOG_DIR/{stdout,stderr}.log"
+info "logs: $LOG_DIR/stderr.log"
