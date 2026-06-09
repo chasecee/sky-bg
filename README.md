@@ -25,15 +25,16 @@ Bash is only used for install / dev tooling: `scripts/build.sh`, `scripts/instal
 ## Model
 
 1. Fetch the source. JPEG endpoints are pulled directly; MP4/MOV endpoints go through AVFoundation, which uses HTTP range requests to grab only the moov atom + trailing samples and decode the last frame.
-2. SHA-256 the raw bytes; if it matches last cycle's hash, exit early. (`install.sh` deletes `output/last-hash` so any config edit forces a re-process.)
+2. SHA-256 the raw bytes; if it matches last cycle's hash, exit early — unless `BLEND_WEIGHTS` has length > 1, in which case every cycle re-renders so the trail toward the latest source keeps advancing. (`install.sh` deletes `output/last-hash` so any config edit forces a re-process.)
 3. Archive the source frame into `HISTORY_DIR` as `frame-<timestamp>-<sha>.jpg` and append metadata to `HISTORY_DIR/index.csv` (`timestamp_utc,unix_ms,sha256,file`).
-4. Trim the top `RAW_CROP_TOP` rows (the webcam's burned-in timestamp banner).
-5. Auto-detect every monitor via `NSScreen` (origin in points, pixel size, screen handle).
-6. Compute the bounding rect of all monitor frames — that's the virtual canvas.
-7. Scale the source onto the canvas per `CANVAS_FIT` (`cover` fills + crops overflow, `contain` letterboxes), pinned per `CANVAS_ANCHOR`.
-8. Apply `CIColorControls` (saturation/brightness) and optional blur. `BLUR_RADIUS` accepts a single number (uniform `CIGaussianBlur`) or a comma-separated stop list (`CIMaskedVariableBlur` driven by a vertical gradient mask, e.g. `5,20` = light at top, heavy at bottom).
-9. For each monitor, slice the canvas at that monitor's point-rect, resample to its native pixel resolution, and write to `wallpaper-<id>-{A|B}.heic` (alternating slot — fresh path each cycle so the WindowServer refreshes, but bounded "Recent Wallpapers" entries).
-10. Apply each slice via `NSWorkspace.setDesktopImageURL` against that monitor's `NSScreen`, dispatched concurrently across displays.
+4. If `BLEND_WEIGHTS` has N > 1 entries, composite the current frame with up to N-1 past frames stored in `output/prev-1.jpg … prev-(N-1).jpg`. Layers are stacked oldest-to-newest with αₖ = wₖ / Σ(w₀..wₖ) (`CIColorMatrix` + `CISourceOverCompositing`), which collapses to the exact normalized weighted sum in a single CI graph. After processing, the ring rotates: each `prev-(i-1).jpg` shifts to `prev-i.jpg` and the current raw bytes become `prev-1.jpg`. Missing past frames (cold start) gracefully degrade to a shorter trail. Combined with a short `INTERVAL_SEC` and the heavy default blur, adjacent composites differ by only a few percent — the hard wallpaper swap reads as a smooth continuous fade, despite `NSWorkspace.setDesktopImageURL` having no fade primitive (still true on macOS Tahoe).
+5. Trim the top `RAW_CROP_TOP` rows (the webcam's burned-in timestamp banner).
+6. Auto-detect every monitor via `NSScreen` (origin in points, pixel size, screen handle).
+7. Compute the bounding rect of all monitor frames — that's the virtual canvas.
+8. Scale the source onto the canvas per `CANVAS_FIT` (`cover` fills + crops overflow, `contain` letterboxes), pinned per `CANVAS_ANCHOR`.
+9. Apply `CIColorControls` (saturation/brightness) and optional blur. `BLUR_RADIUS` accepts a single number (uniform `CIGaussianBlur`) or a comma-separated stop list (`CIMaskedVariableBlur` driven by a vertical gradient mask, e.g. `5,20` = light at top, heavy at bottom).
+10. For each monitor, slice the canvas at that monitor's point-rect, resample to its native pixel resolution, and write to `wallpaper-<id>-{A|B}.heic` (alternating slot — fresh path each cycle so the WindowServer refreshes, but bounded "Recent Wallpapers" entries).
+11. Apply each slice via `NSWorkspace.setDesktopImageURL` against that monitor's `NSScreen`, dispatched concurrently across displays.
 
 ## Layout
 
@@ -67,7 +68,7 @@ All knobs live in `config.sh` (overridable via env). The binary reads them from 
 | Var                | Default                                                         | Notes                                                             |
 |--------------------|-----------------------------------------------------------------|-------------------------------------------------------------------|
 | `WEBCAM_URL`       | `http://<thingino-ip>/x/ch0.jpg?token=$WEBCAM_TOKEN`            | JPEG, MP4, or MOV. Video sources decode last frame via AVFoundation |
-| `INTERVAL_SEC`     | 120                                                             | launchd `StartInterval`                                           |
+| `INTERVAL_SEC`     | 10                                                              | launchd `StartInterval`                                           |
 | `OUTPUT_DIR`       | `./output`                                                      | stores `raw.jpg`, `last-hash`, and per-display `wallpaper-*` files |
 | `HISTORY_DIR`      | `./output/history`                                              | append-only archive of source frames + `index.csv`                |
 | `RAW_CROP_TOP`     | 38                                                              | trims camera OSD/banner rows                                      |
@@ -76,6 +77,7 @@ All knobs live in `config.sh` (overridable via env). The binary reads them from 
 | `BLUR_RADIUS`      | `40,30,40`                                                      | scalar = uniform; comma list = top→bottom gradient stops          |
 | `COLOR_SATURATION` | 1.0                                                             | CIColorControls multiplier; 1.0 = unchanged                       |
 | `COLOR_BRIGHTNESS` | -0.05                                                           | CIColorControls additive offset; 0.0 = unchanged                  |
+| `BLEND_WEIGHTS`    | `1,1,1`                                                         | Comma list of frame weights, most-recent first, auto-normalized. List length N = current + (N-1) past frames composited before blur. `1` = no blend (hard swap, hash-skip on). `1,1` = 50/50 trail. `1,1,1` = last-3 equal blend. `3,2,1` = decaying trail. N>1 disables hash-skip; pair with short `INTERVAL_SEC` for smooth-feeling fades. |
 | `LOG_LEVEL`        | info                                                            | `debug | info | warn | error`                                     |
 
 ## Webcam source

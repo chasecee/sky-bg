@@ -13,7 +13,7 @@ WEBCAM_URL="${WEBCAM_URL:-http://192.168.4.203/x/ch0.jpg?token=${WEBCAM_TOKEN:?s
 # Public WBBS alternative:
 # WEBCAM_URL="${WEBCAM_URL:-https://horel.chpc.utah.edu/data/station_cameras/wbbs_cam/wbbs_cam_hour.mp4}"
 
-INTERVAL_SEC="${INTERVAL_SEC:-120}"
+INTERVAL_SEC="${INTERVAL_SEC:-60}"
 
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/output}"
 HISTORY_DIR="${HISTORY_DIR:-$OUTPUT_DIR/history}"
@@ -33,10 +33,24 @@ CANVAS_ANCHOR="${CANVAS_ANCHOR:-0.5}"
 
 # Blur radius applied before slicing. Single value = uniform.
 # Comma list = progressive top->bottom, evenly distributed (e.g. "10,50" or "10,30,50"). 0 = sharp.
-BLUR_RADIUS="${BLUR_RADIUS:-40,30,40}"
+BLUR_RADIUS="${BLUR_RADIUS:-100,40,1,40,100}"
 
 # CIColorControls. Saturation: multiplier (1.0 unchanged). Brightness: additive offset (0.0 unchanged).
 COLOR_SATURATION="${COLOR_SATURATION:-1.0}"
 COLOR_BRIGHTNESS="${COLOR_BRIGHTNESS:--0.05}"
+
+# Chromatic channel shift in canvas px: R offset -X, G fixed, B offset +X along
+# CHANNEL_SHIFT_ANGLE (degrees; 0 = R left / B right, 90 = R top / B bottom).
+# Channels are recombined, then blurred. 0 = off.
+CHANNEL_SHIFT="${CHANNEL_SHIFT:-10}"
+CHANNEL_SHIFT_ANGLE="${CHANNEL_SHIFT_ANGLE:-90}"
+
+# Composite trail of the last N frames (most-recent first, auto-normalized).
+# "1" = no blend (hard swap each cycle, hash-skip enabled).
+# "1,1" = 50/50 current+prev. "1,1,1" = last-3 equal blend.
+# "3,2,1" = 3-frame decaying trail (newest heaviest).
+# Length N >= 2 disables the hash-skip so the trail keeps advancing.
+#BLEND_WEIGHTS="${BLEND_WEIGHTS:-8,4,2,1}"
+BLEND_WEIGHTS="${BLEND_WEIGHTS:-1}"
 
 mkdir -p "$OUTPUT_DIR" "$HISTORY_DIR" "$LOG_DIR"

@@ -14,6 +14,20 @@
 //                     of stops top->bottom (e.g. "10,50")
 //   COLOR_SATURATION: CIColorControls saturation multiplier    (default 1.0)
 //   COLOR_BRIGHTNESS: CIColorControls brightness offset        (default 0.0)
+//   CHANNEL_SHIFT   : chromatic shift in canvas px: R offset    (default 0)
+//                     -X, G fixed, B offset +X along the angle
+//                     axis; recombined before blurring. 0 = off.
+//   CHANNEL_SHIFT_ANGLE : axis in degrees: 0 = R left / B right (default 0)
+//                     (left-to-right), 90 = R top / B bottom.
+//   BLEND_WEIGHTS   : comma list of frame weights, most-recent  (default "1")
+//                     first; auto-normalized. List length = N
+//                     means current + (N-1) past frames are
+//                     composited. "1" disables blending.
+//                     Examples: "1,1" = 50/50 trail (current+prev),
+//                     "1,1,1" = last-3 equal blend,
+//                     "3,2,1" = 3-frame decaying trail.
+//                     N>1 disables the hash-skip so every cycle
+//                     re-renders and the trail keeps advancing.
 //   SKYBG_NO_APPLY  : "1" to skip the wallpaper-set phase      (default unset)
 
 import Foundation
@@ -66,6 +80,9 @@ struct Config {
     let blurStops: [Double]
     let saturation: Double
     let brightness: Double
+    let channelShift: Double
+    let channelShiftAngle: Double
+    let blendWeights: [Double]
     let noApply: Bool
 
     static func fromEnv() -> Config {
@@ -96,6 +113,15 @@ struct Config {
             blurStops: stops.isEmpty ? [0] : stops,
             saturation: Double(env["COLOR_SATURATION"] ?? "1.0") ?? 1.0,
             brightness: Double(env["COLOR_BRIGHTNESS"] ?? "0.0") ?? 0.0,
+            channelShift: Double(env["CHANNEL_SHIFT"] ?? "0") ?? 0,
+            channelShiftAngle: Double(env["CHANNEL_SHIFT_ANGLE"] ?? "0") ?? 0,
+            blendWeights: {
+                let parsed = (env["BLEND_WEIGHTS"] ?? "1")
+                    .split(separator: ",")
+                    .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+                    .filter { $0 > 0 }
+                return parsed.isEmpty ? [1.0] : parsed
+            }(),
             noApply: env["SKYBG_NO_APPLY"] == "1"
         )
     }
@@ -245,6 +271,46 @@ func makeBlurMask(stops: [Double], width: CGFloat, height: CGFloat) -> CIImage {
     return CIImage(cgImage: cg)
 }
 
+// Split into R/G/B, translate R by -shift and B by +shift along the angle axis
+// (0deg = R left / B right, 90deg = R top / B bottom; screen-down convention),
+// then recombine additively. Classic chromatic aberration: identical to the
+// source wherever channels agree, colored fringes at edges.
+func channelShift(_ img: CIImage, shift: Double, angleDeg: Double) -> CIImage {
+    let rad = angleDeg * Double.pi / 180
+    // Screen coords (y down) -> CI coords (y up): negate the y component.
+    let dx = CGFloat(shift * cos(rad))
+    let dy = CGFloat(-shift * sin(rad))
+
+    func channel(_ src: CIImage, r: CGFloat, g: CGFloat, b: CGFloat) -> CIImage {
+        guard let out = CIFilter(
+            name: "CIColorMatrix",
+            parameters: [
+                kCIInputImageKey: src,
+                "inputRVector": CIVector(x: r, y: 0, z: 0, w: 0),
+                "inputGVector": CIVector(x: 0, y: g, z: 0, w: 0),
+                "inputBVector": CIVector(x: 0, y: 0, z: b, w: 0),
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+            ]
+        )?.outputImage else { die("CIColorMatrix channel extract failed") }
+        return out
+    }
+    func add(_ a: CIImage, _ b: CIImage) -> CIImage {
+        guard let out = CIFilter(
+            name: "CIAdditionCompositing",
+            parameters: [kCIInputImageKey: a, kCIInputBackgroundImageKey: b]
+        )?.outputImage else { die("CIAdditionCompositing failed") }
+        return out
+    }
+
+    let clamped = img.clampedToExtent()
+    let rOnly = channel(clamped.transformed(by: CGAffineTransform(translationX: -dx, y: -dy)),
+                        r: 1, g: 0, b: 0)
+    let gOnly = channel(clamped, r: 0, g: 1, b: 0)
+    let bOnly = channel(clamped.transformed(by: CGAffineTransform(translationX: dx, y: dy)),
+                        r: 0, g: 0, b: 1)
+    return add(rOnly, add(bOnly, gOnly)).cropped(to: img.extent)
+}
+
 func cleanupOldCycles(in dir: URL, keep: Set<URL>) {
     let fm = FileManager.default
     guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
@@ -342,6 +408,10 @@ func processCanvas(src: CIImage, monitors: [Monitor], cfg: Config) -> [(Monitor,
         working = adjusted
     }
 
+    if cfg.channelShift != 0 {
+        working = channelShift(working, shift: cfg.channelShift, angleDeg: cfg.channelShiftAngle)
+    }
+
     let canvas: CIImage
     let maxStop = cfg.blurStops.max() ?? 0
     let uniform = Set(cfg.blurStops).count == 1
@@ -416,26 +486,89 @@ log("info", "fetch \(redactURL(cfg.webcamURL))")
 let jpeg = fetchFrameJPEG(url: cfg.webcamURL)
 log("debug", "raw \(jpeg.count) bytes")
 
-// Skip the rest of the pipeline if the bytes match the last cycle. install.sh
-// deletes last-hash so any config edit forces a re-process on the next cycle.
+// Hash-skip the rest of the pipeline if the source bytes match the last cycle.
+// install.sh deletes last-hash so any config edit forces a re-process. With a
+// multi-frame blend trail we always re-render so the trail keeps advancing
+// even on duplicate fetches.
 let hashHex = SHA256.hash(data: jpeg).compactMap { String(format: "%02x", $0) }.joined()
 let hashFile = cfg.outputDir.appendingPathComponent("last-hash")
-if let prev = try? String(contentsOf: hashFile, encoding: .utf8),
-   prev.trimmingCharacters(in: .whitespacesAndNewlines) == hashHex {
+let prevHash = (try? String(contentsOf: hashFile, encoding: .utf8))?
+    .trimmingCharacters(in: .whitespacesAndNewlines)
+let sourceUnchanged = prevHash == hashHex
+if sourceUnchanged && cfg.blendWeights.count == 1 {
     log("info", "source unchanged (sha=\(hashHex.prefix(12))), skipping")
     exit(0)
 }
 try? hashHex.write(to: hashFile, atomically: true, encoding: .utf8)
-archiveSourceFrame(jpeg, hashHex: hashHex, cfg: cfg)
+if !sourceUnchanged {
+    archiveSourceFrame(jpeg, hashHex: hashHex, cfg: cfg)
+}
 
 let rawURL = cfg.outputDir.appendingPathComponent("raw.jpg")
 do { try jpeg.write(to: rawURL) } catch { die("could not write raw.jpg: \(error)") }
-guard let src = CIImage(contentsOf: rawURL) else { die("could not parse raw image") }
+guard let current = CIImage(contentsOf: rawURL) else { die("could not parse raw image") }
+
+func prevFrameURL(_ i: Int) -> URL {
+    cfg.outputDir.appendingPathComponent("prev-\(i).jpg")
+}
+
+func alignedToExtent(_ img: CIImage, _ target: CGRect) -> CIImage {
+    let e = img.extent
+    if e == target { return img }
+    return img
+        .transformed(by: CGAffineTransform(scaleX: target.width / e.width,
+                                           y: target.height / e.height))
+        .transformed(by: CGAffineTransform(translationX: target.origin.x - e.origin.x,
+                                           y: target.origin.y - e.origin.y))
+}
+
+let src: CIImage
+if cfg.blendWeights.count > 1 {
+    // Pair current + available prev-i.jpg with their weights (most recent first),
+    // drop missing past frames, then composite oldest-to-newest with
+    // alpha_k = w_k / sum(w_0..w_k). The math collapses to the exact normalized
+    // weighted sum of all layers in a single CI graph.
+    var layers: [(CIImage, Double)] = [(current, cfg.blendWeights[0])]
+    for i in 1..<cfg.blendWeights.count {
+        if let img = CIImage(contentsOf: prevFrameURL(i)) {
+            layers.append((alignedToExtent(img, current.extent), cfg.blendWeights[i]))
+        }
+    }
+    if layers.count == 1 {
+        src = current
+    } else {
+        var composed: CIImage = layers.last!.0
+        var cumulative: Double = layers.last!.1
+        for (img, w) in layers.dropLast().reversed() {
+            cumulative += w
+            let alpha = CGFloat(w / cumulative)
+            guard let attenuated = CIFilter(
+                name: "CIColorMatrix",
+                parameters: [
+                    kCIInputImageKey: img,
+                    "inputAVector": CIVector(x: 0, y: 0, z: 0, w: alpha),
+                ]
+            )?.outputImage,
+            let next = CIFilter(
+                name: "CISourceOverCompositing",
+                parameters: [
+                    kCIInputImageKey: attenuated,
+                    kCIInputBackgroundImageKey: composed,
+                ]
+            )?.outputImage else { die("blend composite failed at layer w=\(w)") }
+            composed = next
+        }
+        src = composed
+        log("info", "blend \(layers.count)-frame weights=\(layers.map { $0.1 })")
+    }
+} else {
+    src = current
+}
 
 let monitors = detectMonitors()
 guard !monitors.isEmpty else { die("no displays detected") }
 log("info", "displays: " + monitors.map { "\($0.label)#\($0.id) \($0.widthPx)x\($0.heightPx)" }.joined(separator: ", "))
-log("info", "process fit=\(cfg.fit) anchor=\(cfg.anchor) blur=\(cfg.blurStops) sat=\(cfg.saturation) bri=\(cfg.brightness) crop_top=\(Int(cfg.cropTop))")
+log("info", "process fit=\(cfg.fit) anchor=\(cfg.anchor) blur=\(cfg.blurStops) sat=\(cfg.saturation) bri=\(cfg.brightness) crop_top=\(Int(cfg.cropTop)) shift=\(cfg.channelShift)@\(cfg.channelShiftAngle)deg")
 
 let outputs = processCanvas(src: src, monitors: monitors, cfg: cfg)
 
@@ -457,6 +590,31 @@ if cfg.noApply {
     }
     if let err = firstErr { die(err) }
     cleanupOldCycles(in: cfg.outputDir, keep: Set(outputs.map { $0.1 }))
+}
+
+// Rolling ring buffer: shift prev-(i-1) → prev-i for i = N-1 down to 2, then
+// write the current raw bytes to prev-1.jpg. Prune any prev-K.jpg with K >= N
+// so shrinking BLEND_WEIGHTS doesn't leak stale frames.
+do {
+    let fm = FileManager.default
+    let n = cfg.blendWeights.count
+    if n > 1 {
+        for i in stride(from: n - 1, through: 2, by: -1) {
+            let from = prevFrameURL(i - 1), to = prevFrameURL(i)
+            if fm.fileExists(atPath: from.path) {
+                try? fm.removeItem(at: to)
+                try? fm.moveItem(at: from, to: to)
+            }
+        }
+        try jpeg.write(to: prevFrameURL(1))
+    }
+    var k = max(n, 1)
+    while fm.fileExists(atPath: prevFrameURL(k).path) {
+        try? fm.removeItem(at: prevFrameURL(k))
+        k += 1
+    }
+} catch {
+    log("warn", "prev rotation failed: \(error)")
 }
 
 log("info", "done")

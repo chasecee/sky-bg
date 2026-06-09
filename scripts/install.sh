@@ -11,7 +11,8 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # at install time should be done by editing config.sh, not via env.
 unset WEBCAM_URL INTERVAL_SEC OUTPUT_DIR HISTORY_DIR LOG_DIR LOG_LEVEL \
       RAW_CROP_TOP CANVAS_FIT CANVAS_ANCHOR BLUR_RADIUS \
-      COLOR_SATURATION COLOR_BRIGHTNESS
+      COLOR_SATURATION COLOR_BRIGHTNESS BLEND_WEIGHTS \
+      CHANNEL_SHIFT CHANNEL_SHIFT_ANGLE
 
 source "$PROJECT_DIR/config.sh"
 
@@ -49,6 +50,9 @@ sed \
   -e "s|__BLUR_RADIUS__|$BLUR_RADIUS|g" \
   -e "s|__COLOR_SATURATION__|$COLOR_SATURATION|g" \
   -e "s|__COLOR_BRIGHTNESS__|$COLOR_BRIGHTNESS|g" \
+  -e "s|__BLEND_WEIGHTS__|$BLEND_WEIGHTS|g" \
+  -e "s|__CHANNEL_SHIFT__|$CHANNEL_SHIFT|g" \
+  -e "s|__CHANNEL_SHIFT_ANGLE__|$CHANNEL_SHIFT_ANGLE|g" \
   "$PLIST_SRC" > "$PLIST_DST"
 
 rm -f "$OUTPUT_DIR/last-hash"
@@ -56,7 +60,8 @@ rm -f "$OUTPUT_DIR/last-hash"
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
 launchctl bootstrap "$DOMAIN" "$PLIST_DST"
 launchctl enable "$DOMAIN/$LABEL"
+launchctl kickstart "$DOMAIN/$LABEL"
 
 info "installed $LABEL (interval=${INTERVAL_SEC}s)"
-info "  fit=$CANVAS_FIT anchor=$CANVAS_ANCHOR blur=$BLUR_RADIUS sat=$COLOR_SATURATION bri=$COLOR_BRIGHTNESS crop_top=$RAW_CROP_TOP"
+info "  fit=$CANVAS_FIT anchor=$CANVAS_ANCHOR blur=$BLUR_RADIUS sat=$COLOR_SATURATION bri=$COLOR_BRIGHTNESS crop_top=$RAW_CROP_TOP blend_weights=$BLEND_WEIGHTS shift=$CHANNEL_SHIFT@${CHANNEL_SHIFT_ANGLE}deg"
 info "logs: $LOG_DIR/stderr.log"

@@ -32,6 +32,12 @@
     <string>__COLOR_SATURATION__</string>
     <key>COLOR_BRIGHTNESS</key>
     <string>__COLOR_BRIGHTNESS__</string>
+    <key>BLEND_WEIGHTS</key>
+    <string>__BLEND_WEIGHTS__</string>
+    <key>CHANNEL_SHIFT</key>
+    <string>__CHANNEL_SHIFT__</string>
+    <key>CHANNEL_SHIFT_ANGLE</key>
+    <string>__CHANNEL_SHIFT_ANGLE__</string>
   </dict>
   <key>WorkingDirectory</key>
   <string>__PROJECT_DIR__</string>
