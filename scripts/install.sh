@@ -12,13 +12,16 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 unset WEBCAM_URL INTERVAL_SEC OUTPUT_DIR HISTORY_DIR LOG_DIR LOG_LEVEL \
       RAW_CROP_TOP CANVAS_FIT CANVAS_ANCHOR BLUR_RADIUS \
       COLOR_SATURATION COLOR_BRIGHTNESS BLEND_WEIGHTS \
-      CHANNEL_SHIFT CHANNEL_SHIFT_ANGLE
+      CHANNEL_SHIFT CHANNEL_SHIFT_ANGLE CHANNEL_SHIFT_SCHEDULE
 
 source "$PROJECT_DIR/config.sh"
 
 LABEL="com.skybg.wallpaper"
 PLIST_SRC="$PROJECT_DIR/$LABEL.plist"
 PLIST_DST="$HOME/Library/LaunchAgents/$LABEL.plist"
+CLEANUP_LABEL="com.skybg.cache-cleanup"
+CLEANUP_PLIST_SRC="$PROJECT_DIR/$CLEANUP_LABEL.plist"
+CLEANUP_PLIST_DST="$HOME/Library/LaunchAgents/$CLEANUP_LABEL.plist"
 DOMAIN="gui/$(id -u)"
 
 info() { echo "skybg: $*" >&2; }
@@ -26,8 +29,9 @@ fail() { info "$*"; exit 1; }
 
 if [[ "${1:-}" == "--unload" ]]; then
   launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
-  rm -f "$PLIST_DST"
-  info "unloaded $LABEL"
+  launchctl bootout "$DOMAIN/$CLEANUP_LABEL" 2>/dev/null || true
+  rm -f "$PLIST_DST" "$CLEANUP_PLIST_DST"
+  info "unloaded $LABEL and $CLEANUP_LABEL"
   exit 0
 fi
 
@@ -53,7 +57,13 @@ sed \
   -e "s|__BLEND_WEIGHTS__|$BLEND_WEIGHTS|g" \
   -e "s|__CHANNEL_SHIFT__|$CHANNEL_SHIFT|g" \
   -e "s|__CHANNEL_SHIFT_ANGLE__|$CHANNEL_SHIFT_ANGLE|g" \
+  -e "s|__CHANNEL_SHIFT_SCHEDULE__|${CHANNEL_SHIFT_SCHEDULE:-}|g" \
   "$PLIST_SRC" > "$PLIST_DST"
+
+sed \
+  -e "s|__PROJECT_DIR__|$PROJECT_DIR|g" \
+  -e "s|__LOG_DIR__|$LOG_DIR|g" \
+  "$CLEANUP_PLIST_SRC" > "$CLEANUP_PLIST_DST"
 
 rm -f "$OUTPUT_DIR/last-hash"
 
@@ -62,6 +72,11 @@ launchctl bootstrap "$DOMAIN" "$PLIST_DST"
 launchctl enable "$DOMAIN/$LABEL"
 launchctl kickstart "$DOMAIN/$LABEL"
 
+launchctl bootout "$DOMAIN/$CLEANUP_LABEL" 2>/dev/null || true
+launchctl bootstrap "$DOMAIN" "$CLEANUP_PLIST_DST"
+launchctl enable "$DOMAIN/$CLEANUP_LABEL"
+launchctl kickstart "$DOMAIN/$CLEANUP_LABEL"
+
 info "installed $LABEL (interval=${INTERVAL_SEC}s)"
-info "  fit=$CANVAS_FIT anchor=$CANVAS_ANCHOR blur=$BLUR_RADIUS sat=$COLOR_SATURATION bri=$COLOR_BRIGHTNESS crop_top=$RAW_CROP_TOP blend_weights=$BLEND_WEIGHTS shift=$CHANNEL_SHIFT@${CHANNEL_SHIFT_ANGLE}deg"
+info "  fit=$CANVAS_FIT anchor=$CANVAS_ANCHOR blur=$BLUR_RADIUS sat=$COLOR_SATURATION bri=$COLOR_BRIGHTNESS crop_top=$RAW_CROP_TOP blend_weights=$BLEND_WEIGHTS shift=$CHANNEL_SHIFT@${CHANNEL_SHIFT_ANGLE}deg schedule=${CHANNEL_SHIFT_SCHEDULE:-off}"
 info "logs: $LOG_DIR/stderr.log"

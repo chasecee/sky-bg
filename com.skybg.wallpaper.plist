@@ -38,6 +38,8 @@
     <string>__CHANNEL_SHIFT__</string>
     <key>CHANNEL_SHIFT_ANGLE</key>
     <string>__CHANNEL_SHIFT_ANGLE__</string>
+    <key>CHANNEL_SHIFT_SCHEDULE</key>
+    <string>__CHANNEL_SHIFT_SCHEDULE__</string>
   </dict>
   <key>WorkingDirectory</key>
   <string>__PROJECT_DIR__</string>

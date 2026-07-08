@@ -19,6 +19,11 @@
 //                     axis; recombined before blurring. 0 = off.
 //   CHANNEL_SHIFT_ANGLE : axis in degrees: 0 = R left / B right (default 0)
 //                     (left-to-right), 90 = R top / B bottom.
+//   CHANNEL_SHIFT_SCHEDULE : comma-separated HH:MM:value control points
+//                     that define a cosine-eased day curve for the shift
+//                     magnitude. When set, overrides CHANNEL_SHIFT.
+//                     Points wrap across midnight. Angle is unchanged.
+//                     Example: "06:00:10,12:00:110,20:00:40,23:30:10"
 //   BLEND_WEIGHTS   : comma list of frame weights, most-recent  (default "1")
 //                     first; auto-normalized. List length = N
 //                     means current + (N-1) past frames are
@@ -82,6 +87,7 @@ struct Config {
     let brightness: Double
     let channelShift: Double
     let channelShiftAngle: Double
+    let channelShiftSchedule: [(minutes: Int, value: Double)]
     let blendWeights: [Double]
     let noApply: Bool
 
@@ -115,6 +121,20 @@ struct Config {
             brightness: Double(env["COLOR_BRIGHTNESS"] ?? "0.0") ?? 0.0,
             channelShift: Double(env["CHANNEL_SHIFT"] ?? "0") ?? 0,
             channelShiftAngle: Double(env["CHANNEL_SHIFT_ANGLE"] ?? "0") ?? 0,
+            channelShiftSchedule: {
+                guard let raw = env["CHANNEL_SHIFT_SCHEDULE"], !raw.isEmpty else { return [] }
+                var pts: [(Int, Double)] = []
+                for token in raw.split(separator: ",") {
+                    let parts = token.trimmingCharacters(in: .whitespaces).split(separator: ":")
+                    guard parts.count == 3,
+                          let h = Int(parts[0]), let m = Int(parts[1]), let v = Double(parts[2]),
+                          (0...23).contains(h), (0...59).contains(m) else {
+                        continue
+                    }
+                    pts.append((h * 60 + m, v))
+                }
+                return pts.sorted { $0.0 < $1.0 }
+            }(),
             blendWeights: {
                 let parsed = (env["BLEND_WEIGHTS"] ?? "1")
                     .split(separator: ",")
@@ -271,6 +291,35 @@ func makeBlurMask(stops: [Double], width: CGFloat, height: CGFloat) -> CIImage {
     return CIImage(cgImage: cg)
 }
 
+// Evaluate the shift schedule at the current wall-clock time using cosine easing
+// between adjacent control points. Points are sorted by minute-of-day and wrap
+// across midnight so the curve is continuous at 00:00.
+func resolvedChannelShift(schedule: [(minutes: Int, value: Double)], fallback: Double) -> Double {
+    guard schedule.count >= 2 else { return schedule.first.map { $0.value } ?? fallback }
+    let now = Calendar.current.dateComponents([.hour, .minute], from: Date())
+    let currentMin = (now.hour ?? 0) * 60 + (now.minute ?? 0)
+    // Find the surrounding pair, wrapping across midnight.
+    var lo = schedule.last!
+    var hi = schedule.first!
+    for i in 0..<schedule.count {
+        let pt = schedule[i]
+        if pt.minutes <= currentMin {
+            lo = pt
+            hi = schedule[(i + 1) % schedule.count]
+        }
+    }
+    // Span in minutes, wrapping midnight.
+    let span = hi.minutes > lo.minutes
+        ? Double(hi.minutes - lo.minutes)
+        : Double(hi.minutes + 1440 - lo.minutes)
+    let elapsed = hi.minutes > lo.minutes
+        ? Double(currentMin - lo.minutes)
+        : Double(currentMin >= lo.minutes ? currentMin - lo.minutes : currentMin + 1440 - lo.minutes)
+    let t = span > 0 ? elapsed / span : 0
+    let smooth = (1 - cos(t * Double.pi)) / 2
+    return lo.value + smooth * (hi.value - lo.value)
+}
+
 // Split into R/G/B, translate R by -shift and B by +shift along the angle axis
 // (0deg = R left / B right, 90deg = R top / B bottom; screen-down convention),
 // then recombine additively. Classic chromatic aberration: identical to the
@@ -311,28 +360,6 @@ func channelShift(_ img: CIImage, shift: Double, angleDeg: Double) -> CIImage {
     return add(rOnly, add(bOnly, gOnly)).cropped(to: img.extent)
 }
 
-// The wallpaper agent renders every image it's handed into a decompressed BMP
-// in its container cache and never prunes it (~14 MB per set per display; this
-// is what grew to 340 GB). Deleting entries older than 5 minutes is safe:
-// in-use files stay mapped by WindowServer after unlink, and the agent
-// regenerates on demand.
-func cleanupWallpaperAgentCache(olderThan maxAge: TimeInterval = 300) {
-    let fm = FileManager.default
-    let dir = fm.homeDirectoryForCurrentUser.appendingPathComponent(
-        "Library/Containers/com.apple.wallpaper.agent/Data/Library/Caches/com.apple.wallpaper.caches/extension-com.apple.wallpaper.extension.image")
-    guard let entries = try? fm.contentsOfDirectory(
-        at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
-    let cutoff = Date().addingTimeInterval(-maxAge)
-    var removed = 0
-    for url in entries where url.pathExtension == "bmp" {
-        let mod = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-        if let mod, mod < cutoff {
-            try? fm.removeItem(at: url)
-            removed += 1
-        }
-    }
-    if removed > 0 { log("info", "pruned \(removed) stale wallpaper-agent cache bmp(s)") }
-}
 
 func cleanupOldCycles(in dir: URL, keep: Set<URL>) {
     let fm = FileManager.default
@@ -384,7 +411,7 @@ func archiveSourceFrame(_ data: Data, hashHex: String, cfg: Config) {
     }
 }
 
-func processCanvas(src: CIImage, monitors: [Monitor], cfg: Config) -> [(Monitor, URL)] {
+func processCanvas(src: CIImage, monitors: [Monitor], cfg: Config, channelShift shift: Double) -> [(Monitor, URL)] {
     let srcExt = src.extent
     guard srcExt.height > cfg.cropTop else { die("RAW_CROP_TOP \(cfg.cropTop) >= source height \(srcExt.height)") }
 
@@ -431,8 +458,8 @@ func processCanvas(src: CIImage, monitors: [Monitor], cfg: Config) -> [(Monitor,
         working = adjusted
     }
 
-    if cfg.channelShift != 0 {
-        working = channelShift(working, shift: cfg.channelShift, angleDeg: cfg.channelShiftAngle)
+    if shift != 0 {
+        working = channelShift(working, shift: shift, angleDeg: cfg.channelShiftAngle)
     }
 
     let canvas: CIImage
@@ -591,9 +618,11 @@ if cfg.blendWeights.count > 1 {
 let monitors = detectMonitors()
 guard !monitors.isEmpty else { die("no displays detected") }
 log("info", "displays: " + monitors.map { "\($0.label)#\($0.id) \($0.widthPx)x\($0.heightPx)" }.joined(separator: ", "))
-log("info", "process fit=\(cfg.fit) anchor=\(cfg.anchor) blur=\(cfg.blurStops) sat=\(cfg.saturation) bri=\(cfg.brightness) crop_top=\(Int(cfg.cropTop)) shift=\(cfg.channelShift)@\(cfg.channelShiftAngle)deg")
+let effectiveShift = resolvedChannelShift(schedule: cfg.channelShiftSchedule, fallback: cfg.channelShift)
+let shiftDesc = cfg.channelShiftSchedule.isEmpty ? "\(effectiveShift)" : "\(String(format: "%.1f", effectiveShift)) (scheduled)"
+log("info", "process fit=\(cfg.fit) anchor=\(cfg.anchor) blur=\(cfg.blurStops) sat=\(cfg.saturation) bri=\(cfg.brightness) crop_top=\(Int(cfg.cropTop)) shift=\(shiftDesc)@\(cfg.channelShiftAngle)deg")
 
-let outputs = processCanvas(src: src, monitors: monitors, cfg: cfg)
+let outputs = processCanvas(src: src, monitors: monitors, cfg: cfg, channelShift: effectiveShift)
 
 if cfg.noApply {
     log("info", "SKYBG_NO_APPLY=1, skipping wallpaper set")
@@ -613,7 +642,6 @@ if cfg.noApply {
     }
     if let err = firstErr { die(err) }
     cleanupOldCycles(in: cfg.outputDir, keep: Set(outputs.map { $0.1 }))
-    cleanupWallpaperAgentCache()
 }
 
 // Rolling ring buffer: shift prev-(i-1) → prev-i for i = N-1 down to 2, then

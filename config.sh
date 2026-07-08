@@ -45,6 +45,13 @@ COLOR_BRIGHTNESS="${COLOR_BRIGHTNESS:--0.05}"
 CHANNEL_SHIFT="${CHANNEL_SHIFT:-110}"
 CHANNEL_SHIFT_ANGLE="${CHANNEL_SHIFT_ANGLE:-45}"
 
+# Optional day curve for the shift magnitude. Comma-separated HH:MM:value control
+# points; the binary cosine-eases between them based on the current wall-clock time.
+# When set, overrides CHANNEL_SHIFT. Angle is unchanged.
+# 09:30-18:00 holds at 10 (focus), eases to 50 by 21:00, peaks at 150 midnight-5am,
+# then fades back to 10 by 09:30.
+CHANNEL_SHIFT_SCHEDULE="${CHANNEL_SHIFT_SCHEDULE:-09:30:10,18:00:10,21:00:50,00:00:150,05:00:80}"
+
 # Composite trail of the last N frames (most-recent first, auto-normalized).
 # "1" = no blend (hard swap each cycle, hash-skip enabled).
 # "1,1" = 50/50 current+prev. "1,1,1" = last-3 equal blend.
