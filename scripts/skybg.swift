@@ -311,6 +311,29 @@ func channelShift(_ img: CIImage, shift: Double, angleDeg: Double) -> CIImage {
     return add(rOnly, add(bOnly, gOnly)).cropped(to: img.extent)
 }
 
+// The wallpaper agent renders every image it's handed into a decompressed BMP
+// in its container cache and never prunes it (~14 MB per set per display; this
+// is what grew to 340 GB). Deleting entries older than 5 minutes is safe:
+// in-use files stay mapped by WindowServer after unlink, and the agent
+// regenerates on demand.
+func cleanupWallpaperAgentCache(olderThan maxAge: TimeInterval = 300) {
+    let fm = FileManager.default
+    let dir = fm.homeDirectoryForCurrentUser.appendingPathComponent(
+        "Library/Containers/com.apple.wallpaper.agent/Data/Library/Caches/com.apple.wallpaper.caches/extension-com.apple.wallpaper.extension.image")
+    guard let entries = try? fm.contentsOfDirectory(
+        at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+    let cutoff = Date().addingTimeInterval(-maxAge)
+    var removed = 0
+    for url in entries where url.pathExtension == "bmp" {
+        let mod = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        if let mod, mod < cutoff {
+            try? fm.removeItem(at: url)
+            removed += 1
+        }
+    }
+    if removed > 0 { log("info", "pruned \(removed) stale wallpaper-agent cache bmp(s)") }
+}
+
 func cleanupOldCycles(in dir: URL, keep: Set<URL>) {
     let fm = FileManager.default
     guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
@@ -590,6 +613,7 @@ if cfg.noApply {
     }
     if let err = firstErr { die(err) }
     cleanupOldCycles(in: cfg.outputDir, keep: Set(outputs.map { $0.1 }))
+    cleanupWallpaperAgentCache()
 }
 
 // Rolling ring buffer: shift prev-(i-1) → prev-i for i = N-1 down to 2, then

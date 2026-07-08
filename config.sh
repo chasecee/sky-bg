@@ -42,8 +42,8 @@ COLOR_BRIGHTNESS="${COLOR_BRIGHTNESS:--0.05}"
 # Chromatic channel shift in canvas px: R offset -X, G fixed, B offset +X along
 # CHANNEL_SHIFT_ANGLE (degrees; 0 = R left / B right, 90 = R top / B bottom).
 # Channels are recombined, then blurred. 0 = off.
-CHANNEL_SHIFT="${CHANNEL_SHIFT:-10}"
-CHANNEL_SHIFT_ANGLE="${CHANNEL_SHIFT_ANGLE:-90}"
+CHANNEL_SHIFT="${CHANNEL_SHIFT:-110}"
+CHANNEL_SHIFT_ANGLE="${CHANNEL_SHIFT_ANGLE:-45}"
 
 # Composite trail of the last N frames (most-recent first, auto-normalized).
 # "1" = no blend (hard swap each cycle, hash-skip enabled).
