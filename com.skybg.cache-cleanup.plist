@@ -6,8 +6,7 @@
   <string>com.skybg.cache-cleanup</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/sh</string>
-    <string>__PROJECT_DIR__/scripts/cleanup-cache.sh</string>
+    <string>__PROJECT_DIR__/bin/skybg-cleanup</string>
   </array>
   <key>StartInterval</key>
   <integer>300</integer>

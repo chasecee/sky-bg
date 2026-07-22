@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>com.skybg.cache-cleanup</string>
+  <key>CFBundleName</key>
+  <string>skybg-cleanup</string>
+  <key>CFBundleVersion</key>
+  <string>1.0</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>NSAppDataUsageDescription</key>
+  <string>Prunes the macOS wallpaper agent image cache so it does not fill the disk.</string>
+</dict>
+</plist>
