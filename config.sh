@@ -13,7 +13,7 @@ WEBCAM_URL="${WEBCAM_URL:-http://192.168.4.203/x/ch0.jpg?token=${WEBCAM_TOKEN:?s
 # Public WBBS alternative:
 # WEBCAM_URL="${WEBCAM_URL:-https://horel.chpc.utah.edu/data/station_cameras/wbbs_cam/wbbs_cam_hour.mp4}"
 
-INTERVAL_SEC="${INTERVAL_SEC:-60}"
+INTERVAL_SEC="${INTERVAL_SEC:-900}"
 
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/output}"
 HISTORY_DIR="${HISTORY_DIR:-$OUTPUT_DIR/history}"

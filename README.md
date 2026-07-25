@@ -10,7 +10,7 @@ Imagery courtesy of the [Horel Research Group](https://horel.chpc.utah.edu/) (Me
 
 ## Stack
 
-A single compiled Swift binary (`bin/skybg`) does everything image-and-display:
+Two compiled Swift binaries: `bin/skybg` (image + display) and `bin/skybg-cleanup` (prunes the macOS wallpaper-agent BMP cache that otherwise grows without bound). Image pipeline:
 
 - `URLSession` — JPEG fetch
 - `AVFoundation` — `AVURLAsset` + `AVAssetImageGenerator` decode the trailing frame of remote MP4/MOV via HTTP range reads (no full-file download)
@@ -40,25 +40,29 @@ Bash is only used for install / dev tooling: `scripts/build.sh`, `scripts/instal
 
 ```
 sky-bg/
-├── config.sh                  # defaults sourced by install.sh and test/run-once.sh
-├── com.skybg.wallpaper.plist  # launchd template (placeholders substituted by install.sh)
+├── config.sh                       # defaults sourced by install.sh and test/run-once.sh
+├── com.skybg.wallpaper.plist       # wallpaper agent launchd template
+├── com.skybg.cache-cleanup.plist   # cache-prune agent launchd template (every 5 min)
 ├── scripts/
-│   ├── skybg.swift            # the whole runtime pipeline
-│   ├── screensaver.swift      # SkyBgScreenSaverView source for the .saver bundle
-│   ├── build.sh               # swiftc -O scripts/skybg.swift -o bin/skybg
-│   ├── build-saver.sh         # build SkyBg.saver bundle (Developer ID signed)
-│   ├── install.sh             # build + render plist + launchctl bootstrap (--unload to remove)
-│   ├── install-saver.sh       # copy SkyBg.saver into ~/Library/Screen Savers/
-│   ├── detect.sh              # debug: dump the current NSScreen arrangement
-│   ├── gen-preview.sh         # render docs/preview.gif (sources config.sh)
-│   └── gen-preview.swift      # standalone Swift, animated multi-monitor stitch
+│   ├── skybg.swift                 # wallpaper pipeline
+│   ├── cleanup.swift               # wallpaper-agent BMP cache prune
+│   ├── cleanup-info.plist          # embedded into skybg-cleanup for persistent TCC grant
+│   ├── screensaver.swift           # SkyBgScreenSaverView source for the .saver bundle
+│   ├── build.sh                    # builds + Developer ID–signs bin/skybg and bin/skybg-cleanup
+│   ├── build-saver.sh              # build SkyBg.saver bundle (Developer ID signed)
+│   ├── install.sh                  # build + render plists + launchctl bootstrap (--unload to remove)
+│   ├── install-saver.sh            # copy SkyBg.saver into ~/Library/Screen Savers/
+│   ├── detect.sh                   # debug: dump the current NSScreen arrangement
+│   ├── gen-preview.sh              # render docs/preview.gif (sources config.sh)
+│   └── gen-preview.swift           # standalone Swift, animated multi-monitor stitch
 ├── test/
-│   └── run-once.sh            # rebuild + run once (--watch, --no-set)
-├── docs/preview.gif           # README artifact rendered by gen-preview.sh
-├── bin/skybg                  # built locally, gitignored
-├── SkyBg.saver/               # built locally, gitignored
-├── output/                    # raw.jpg + wallpaper-<id>-{A|B}.heic + last-hash + history/ (tracked)
-└── .logs/                     # launchd stderr log (gitignored)
+│   └── run-once.sh                 # rebuild + run once (--watch, --no-set)
+├── docs/preview.gif                # README artifact rendered by gen-preview.sh
+├── bin/skybg                       # built locally, gitignored
+├── bin/skybg-cleanup               # built locally, gitignored
+├── SkyBg.saver/                    # built locally, gitignored
+├── output/                         # raw.jpg + wallpaper-<id>-{A|B}.heic + last-hash + history/
+└── .logs/                          # stderr.log + cache-cleanup.log (gitignored)
 ```
 
 ## Configuration
@@ -68,7 +72,7 @@ All knobs live in `config.sh` (overridable via env). The binary reads them from 
 | Var                | Default                                                         | Notes                                                             |
 |--------------------|-----------------------------------------------------------------|-------------------------------------------------------------------|
 | `WEBCAM_URL`       | `http://<thingino-ip>/x/ch0.jpg?token=$WEBCAM_TOKEN`            | JPEG, MP4, or MOV. Video sources decode last frame via AVFoundation |
-| `INTERVAL_SEC`     | 10                                                              | launchd `StartInterval`                                           |
+| `INTERVAL_SEC`     | 900                                                             | launchd `StartInterval` (seconds; default 15 min)                 |
 | `OUTPUT_DIR`       | `./output`                                                      | stores `raw.jpg`, `last-hash`, and per-display `wallpaper-*` files |
 | `HISTORY_DIR`      | `./output/history`                                              | append-only archive of source frames + `index.csv`                |
 | `RAW_CROP_TOP`     | 38                                                              | trims camera OSD/banner rows                                      |
@@ -127,13 +131,15 @@ CANVAS_ANCHOR=1 ./test/run-once.sh      # any env var overrides the config defau
 ## Install
 
 ```bash
-./scripts/install.sh           # builds bin/skybg, copies plist, bootstraps the agent
-./scripts/install.sh --unload  # bootout and remove
+./scripts/install.sh           # builds both binaries, copies plists, bootstraps both agents
+./scripts/install.sh --unload  # bootout and remove both
 ```
 
-The agent runs at load and every `INTERVAL_SEC`. Logs land in `.logs/stderr.log`.
+`com.skybg.wallpaper` runs at load and every `INTERVAL_SEC`. `com.skybg.cache-cleanup` runs every 5 minutes and deletes age-out BMP entries under the wallpaper agent's cache container (macOS keeps an uncompressed ~28 MB framebuffer per unique wallpaper and never GCs them). Logs: `.logs/stderr.log`, `.logs/cache-cleanup.log`.
 
-After editing `config.sh`, re-run `./scripts/install.sh` to re-render the plist and reload. (It also `unset`s any inherited env vars first so leftover shell exports don't leak into the agent.)
+On first run, macOS may prompt **"skybg-cleanup would like to access data from other apps"** — Allow once; the embedded bundle ID + Developer ID signature makes the grant stick across rebuilds. If deletes ever fail, the agent posts a notification and logs the error.
+
+After editing `config.sh`, re-run `./scripts/install.sh` to re-render the plists and reload. (It also `unset`s any inherited env vars first so leftover shell exports don't leak into the agent.)
 
 ## Screensaver (optional)
 
@@ -164,4 +170,5 @@ killall WallpaperAgent legacyScreenSaver Wallpaper WallpaperLegacyExtension 2>/d
 - Display arrangement is detected on every cycle, so plug/unplug/rearrange just works.
 - `NSWorkspace.setDesktopImageURL` is the official wallpaper API and does not have the path-cache bug that `osascript`'s `set picture of desktop` has on macOS 14+. We still alternate filenames between an `-A` and `-B` slot per display so the WindowServer (which caches at a deeper layer) treats each cycle as a fresh path.
 - Cold-start cost: a `swiftc -O` binary launches in ~10 ms; AVFoundation video-frame decode is ~0.4–0.6 s; full cycle wall time ~1–3 s depending on network. The hash-skip path bypasses everything past the fetch (~150 ms total).
-- Output is HEIF 10-bit Display P3 (`writeHEIF10Representation`), file size typically smaller than the equivalent 8-bit JPEG.
+- Output is HEIF 10-bit Display P3 (`writeHEIF10Representation`), file size typically smaller than the equivalent 8-bit JPEG. The huge disk growth this project used to cause was not those HEICs — it was Apple's per-hash BMP cache of the decoded framebuffer (`~/Library/Containers/com.apple.wallpaper.agent/.../extension-com.apple.wallpaper.extension.image/`). `skybg-cleanup` owns that.
+

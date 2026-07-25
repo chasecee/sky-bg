@@ -1,8 +1,7 @@
-// skybg-cleanup — delete wallpaper-agent BMP cache entries older than 5 minutes.
-// Runs as its own signed binary so it can be granted Full Disk Access once in
-// System Settings; launchd-spawned /bin/sh is denied container access by TCC.
-// Logs a heartbeat line every run and posts a notification if the cache grows
-// past 5 GB, so a future silent failure surfaces in minutes, not 500 GB later.
+// skybg-cleanup — prune macOS wallpaper-agent BMP cache entries older than 5 min.
+// launchd /bin/sh is denied the wallpaper container (TCC); a Developer ID–signed
+// binary with an embedded Info.plist gets a persistent App Data grant instead.
+// Heartbeat to stderr every run; notifies if delete fails or cache exceeds 5 GB.
 
 import Foundation
 
@@ -53,6 +52,7 @@ if totalBytes > 5 * 1_073_741_824 || failed > 0 {
     p.arguments = ["-e",
         "display notification \"Wallpaper cache cleanup is failing — check .logs/cache-cleanup.log\" with title \"skybg\""]
     try? p.run()
+    p.waitUntilExit()
 }
 
 exit(failed > 0 ? 1 : 0)
