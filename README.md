@@ -26,7 +26,7 @@ Bash is only used for install / dev tooling: `scripts/build.sh`, `scripts/instal
 
 1. Fetch the source. JPEG endpoints are pulled directly; MP4/MOV endpoints go through AVFoundation, which uses HTTP range requests to grab only the moov atom + trailing samples and decode the last frame.
 2. SHA-256 the raw bytes; if it matches last cycle's hash, exit early — unless `BLEND_WEIGHTS` has length > 1, in which case every cycle re-renders so the trail toward the latest source keeps advancing. (`install.sh` deletes `output/last-hash` so any config edit forces a re-process.)
-3. Archive the source frame into `HISTORY_DIR` as `frame-<timestamp>-<sha>.jpg` and append metadata to `HISTORY_DIR/index.csv` (`timestamp_utc,unix_ms,sha256,file`).
+3. Archive the source frame into `HISTORY_DIR` as `frame-<timestamp>-<sha>.jpg` and append metadata to `HISTORY_DIR/index.csv` (`timestamp_utc,unix_ms,sha256,file`). Once that directory exceeds 500 MB, the oldest `frame-*.jpg` files are deleted.
 4. If `BLEND_WEIGHTS` has N > 1 entries, composite the current frame with up to N-1 past frames stored in `output/prev-1.jpg … prev-(N-1).jpg`. Layers are stacked oldest-to-newest with αₖ = wₖ / Σ(w₀..wₖ) (`CIColorMatrix` + `CISourceOverCompositing`), which collapses to the exact normalized weighted sum in a single CI graph. After processing, the ring rotates: each `prev-(i-1).jpg` shifts to `prev-i.jpg` and the current raw bytes become `prev-1.jpg`. Missing past frames (cold start) gracefully degrade to a shorter trail. Combined with a short `INTERVAL_SEC` and the heavy default blur, adjacent composites differ by only a few percent — the hard wallpaper swap reads as a smooth continuous fade, despite `NSWorkspace.setDesktopImageURL` having no fade primitive (still true on macOS Tahoe).
 5. Trim the top `RAW_CROP_TOP` rows (the webcam's burned-in timestamp banner).
 6. Auto-detect every monitor via `NSScreen` (origin in points, pixel size, screen handle).
@@ -74,7 +74,7 @@ All knobs live in `config.sh` (overridable via env). The binary reads them from 
 | `WEBCAM_URL`       | `http://<thingino-ip>/x/ch0.jpg?token=$WEBCAM_TOKEN`            | JPEG, MP4, or MOV. Video sources decode last frame via AVFoundation |
 | `INTERVAL_SEC`     | 900                                                             | launchd `StartInterval` (seconds; default 15 min)                 |
 | `OUTPUT_DIR`       | `./output`                                                      | stores `raw.jpg`, `last-hash`, and per-display `wallpaper-*` files |
-| `HISTORY_DIR`      | `./output/history`                                              | append-only archive of source frames + `index.csv`                |
+| `HISTORY_DIR`      | `./output/history`                                              | source frames + `index.csv`, capped at 500 MB (oldest frames dropped) |
 | `RAW_CROP_TOP`     | 38                                                              | trims camera OSD/banner rows                                      |
 | `CANVAS_FIT`       | cover                                                           | `cover` fills (crops overflow) / `contain` letterboxes            |
 | `CANVAS_ANCHOR`    | 0.5                                                             | vertical anchor 0..1 (0=bottom, 0.5=center, 1=top)               |

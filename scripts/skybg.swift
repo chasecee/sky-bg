@@ -75,6 +75,89 @@ func rotateLogs() {
     }
 }
 
+func isHistoryFrame(_ name: String) -> Bool {
+    let prefix = "frame-"
+    let suffix = ".jpg"
+    guard name.hasPrefix(prefix), name.hasSuffix(suffix) else { return false }
+    let core = name.dropFirst(prefix.count).dropLast(suffix.count)
+    let parts = core.split(separator: "-", omittingEmptySubsequences: false)
+    guard parts.count == 4,
+          parts[0].count == 8, parts[1].count == 6, parts[2].count == 3, parts[3].count == 12,
+          parts[0].allSatisfy(\.isNumber), parts[1].allSatisfy(\.isNumber), parts[2].allSatisfy(\.isNumber)
+    else { return false }
+    return parts[3].allSatisfy { c in
+        ("0"..."9").contains(c) || ("a"..."f").contains(c)
+    }
+}
+
+// Drop oldest frame-*.jpg until HISTORY_DIR is within the cap. Refuses any
+// directory not named "history". Symlinks and non-matching names are never removed.
+func pruneHistory(at rawDir: URL, maxBytes: Int64) {
+    let fm = FileManager.default
+    let dir = rawDir.standardizedFileURL
+    guard dir.lastPathComponent == "history" else {
+        log("warn", "history prune refused: directory is not named history")
+        return
+    }
+    guard let dirVals = try? dir.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+          dirVals.isDirectory == true, dirVals.isSymbolicLink != true else {
+        log("warn", "history prune refused: not a directory")
+        return
+    }
+    let keys: Set<URLResourceKey> = [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]
+    guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: Array(keys)) else {
+        log("warn", "history prune refused: cannot list")
+        return
+    }
+    struct Item { let url: URL; let name: String; let bytes: Int64 }
+    var frames: [Item] = []
+    var total: Int64 = 0
+    for url in entries {
+        guard url.deletingLastPathComponent().standardizedFileURL.path == dir.path else { continue }
+        guard let vals = try? url.resourceValues(forKeys: keys),
+              vals.isSymbolicLink != true, vals.isRegularFile == true else { continue }
+        let bytes = Int64(vals.fileSize ?? 0)
+        total += bytes
+        if isHistoryFrame(url.lastPathComponent) {
+            frames.append(Item(url: url, name: url.lastPathComponent, bytes: bytes))
+        }
+    }
+    frames.sort { $0.name < $1.name }
+    var deleted = 0
+    while total > maxBytes, !frames.isEmpty {
+        let oldest = frames.removeFirst()
+        do {
+            try fm.removeItem(at: oldest.url)
+            total -= oldest.bytes
+            deleted += 1
+        } catch {
+            log("warn", "history prune delete failed: \(oldest.name)")
+            break
+        }
+    }
+    guard deleted > 0 else {
+        if total > maxBytes { log("warn", "history over cap but nothing removable bytes=\(total)") }
+        return
+    }
+    let keep = Set(frames.map(\.name))
+    let indexURL = dir.appendingPathComponent("index.csv")
+    if let vals = try? indexURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
+       vals.isRegularFile == true, vals.isSymbolicLink != true,
+       let text = try? String(contentsOf: indexURL, encoding: .utf8) {
+        var out = "timestamp_utc,unix_ms,sha256,file\n"
+        for lineSub in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            let line = String(lineSub)
+            if line.hasPrefix("timestamp_utc,") { continue }
+            guard let name = line.split(separator: ",", omittingEmptySubsequences: false).last,
+                  keep.contains(String(name)) else { continue }
+            out.append(line)
+            out.append("\n")
+        }
+        try? out.write(to: indexURL, atomically: true, encoding: .utf8)
+    }
+    log("info", "history prune deleted=\(deleted) kept=\(frames.count) bytes=\(total)")
+}
+
 struct Config {
     let webcamURL: URL
     let outputDir: URL
@@ -531,6 +614,7 @@ func processCanvas(src: CIImage, monitors: [Monitor], cfg: Config, channelShift 
 rotateLogs()
 
 let cfg = Config.fromEnv()
+pruneHistory(at: cfg.historyDir, maxBytes: 500 * 1024 * 1024)
 
 log("info", "fetch \(redactURL(cfg.webcamURL))")
 let jpeg = fetchFrameJPEG(url: cfg.webcamURL)
